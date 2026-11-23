@@ -1,0 +1,425 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Berlingo AR planner</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #111; color: #fff; font-family: system-ui, sans-serif; overflow: hidden; }
+  #overlay { position: fixed; inset: 0; pointer-events: none; }
+  #start { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: #111; pointer-events: auto; }
+  #start h1 { font-size: 24px; margin: 0; }
+  #start p { margin: 0; color: #cbd5e1; max-width: 420px; line-height: 1.4; }
+  button { font: inherit; border: 0; border-radius: 12px; background: #334155; color: #fff; padding: 12px 14px; font-size: 16px; pointer-events: auto; touch-action: manipulation; }
+  button.primary { background: #2563eb; font-size: 20px; padding: 16px 24px; }
+  button.on { background: #2563eb; }
+  #status { position: fixed; top: 12px; left: 12px; right: 12px; background: rgba(0,0,0,.62); padding: 10px 12px; border-radius: 12px; font-size: 14px; line-height: 1.45; white-space: pre-line; display: none; }
+  #hud { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px; background: rgba(0,0,0,.62); display: none; flex-wrap: wrap; gap: 8px; justify-content: center; pointer-events: none; }
+  #hud .row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; width: 100%; }
+  #msg { position: fixed; left: 50%; top: 45%; transform: translate(-50%, -50%); background: rgba(0,0,0,.75); padding: 10px 14px; border-radius: 10px; display: none; font-size: 15px; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="overlay">
+  <div id="start">
+    <h1>Berlingo AR planner</h1>
+    <p>Puts the van in your room at real size. On Quest, tap "Start AR", then point at the floor and press the trigger to place the van.</p>
+    <button class="primary" id="startBtn">Start AR</button>
+    <p id="noxr" style="display:none">AR is not available in this browser. Open this page in the Meta Quest Browser.</p>
+    <button id="previewBtn">Desktop preview</button>
+  </div>
+  <div id="status"></div>
+  <div id="msg"></div>
+  <div id="hud">
+    <div class="row">
+      <button data-layout="Bed">Bed</button>
+      <button data-layout="Lounge">Lounge</button>
+      <button data-layout="Packed">Packed</button>
+    </div>
+    <div class="row">
+      <button id="smaller">Smaller</button>
+      <button id="bigger">Bigger</button>
+      <button id="realSize">Real size</button>
+      <button id="replace">Move van</button>
+    </div>
+    <div class="row">
+      <button id="saveBtn">Save layout</button>
+      <button id="loadBtn">Load layout</button>
+      <button id="outside">Items outside</button>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---------- CONFIG (metres / kg). Placeholders until you measure ----------
+const PAYLOAD_KG = 600;
+const FRONT_AXLE_Z = -1.35, REAR_AXLE_Z = 1.35;   // wheelbase 2.7 m, van centre at 0
+const CEILING_Y = 1.62;                           // inside roof height above ground (from the model)
+const CARGO = { x: 0.75, z0: -0.4, z1: 2.2 };     // load area: bulkhead to rear doors
+
+// Layouts: same surfaces as the desktop planner (A-Frame z = glTF z; front is -z)
+const LAYOUTS = {
+  Bed:    { file: 'berlingo_bed.glb',    kg: 60, centre: [0, 1.2], surf: [
+            { x0: -0.75, x1: 0.75, z0: -0.4, z1: 2.2, top: 0.5 },
+            { x0: -0.70, x1: 0.70, z0: 0.44, z1: 2.16, top: 1.08 } ] },
+  Lounge: { file: 'berlingo_lounge.glb', kg: 70, centre: [0, 0.8], surf: [
+            { x0: -0.75, x1: 0.75, z0: -0.4, z1: 2.2, top: 0.5 },
+            { x0: -0.75, x1: -0.35, z0: 0.3, z1: 1.9, top: 0.97 },
+            { x0: 0.35, x1: 0.75, z0: 0.3, z1: 1.9, top: 0.97 },
+            { x0: -0.30, x1: 0.30, z0: 0.70, z1: 1.30, top: 1.035 } ] },
+  Packed: { file: 'berlingo_packed.glb', kg: 25, centre: [0, 0.6], surf: [
+            { x0: -0.75, x1: 0.75, z0: -0.4, z1: 2.2, top: 0.5 },
+            { x0: -0.40, x1: 0.40, z0: 0.45, z1: 1.85, top: 1.16 },
+            { x0: -0.65, x1: -0.25, z0: 0.05, z1: 0.75, top: 0.775 } ] }
+};
+
+const ITEM_DEFS = [
+  { name: 'Water 20L',    kg: 20,  size: [0.30, 0.40, 0.20], color: 0x3b82f6 },
+  { name: 'Stove',        kg: 4,   size: [0.40, 0.12, 0.35], color: 0xf97316 },
+  { name: 'Gas bottle',   kg: 11,  size: [0.30, 0.40, 0.30], color: 0xef4444 },
+  { name: 'Tools bag',    kg: 8,   size: [0.40, 0.25, 0.25], color: 0x22c55e },
+  { name: 'Cool box',     kg: 6,   size: [0.50, 0.35, 0.35], color: 0x06b6d4 },
+  { name: 'Crate',        kg: 5,   size: [0.40, 0.30, 0.25], color: 0x64748b },
+  { name: 'Spare pillow', kg: 0.5, size: [0.45, 0.12, 0.30], color: 0xf8fafc },
+  { name: 'Football',     kg: 0.4, size: [0.28, 0.16, 0.16], color: 0x7c2d12, shape: 'ball' },
+  { name: 'Golf bag',     kg: 9,   size: [0.30, 0.95, 0.30], color: 0x1e3a8a, shape: 'golf' }
+];
+
+// ---------- Scene ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+document.body.prepend(renderer.domElement);
+renderer.domElement.style.position = 'fixed';
+renderer.domElement.style.inset = '0';
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 50);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 2.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(2, 4, 3);
+scene.add(sun);
+
+const world = new THREE.Group();     // the placed anchor: position + facing
+world.visible = false;
+scene.add(world);
+const vanRoot = new THREE.Group();   // van + items, scaled together
+world.add(vanRoot);
+
+const loader = new GLTFLoader();
+const cache = {};
+let currentLayout = 'Bed';
+let vanModel = null;
+let scaleValue = 1;
+let placed = false;
+
+// Items
+const items = [];
+function makeItem(def) {
+  let g;
+  if (def.shape === 'golf') {
+    g = new THREE.Group();
+    const bag = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.10, 0.9, 16),
+      new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.8 }));
+    g.add(bag);
+    [0xe5e7eb, 0x9ca3af, 0xf5f5f4, 0xd1d5db].forEach((c, i) => {
+      const club = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.9, 8),
+        new THREE.MeshStandardMaterial({ color: c, metalness: 0.6, roughness: 0.3 }));
+      club.position.set(-0.03 + i * 0.02, 0.25, -0.02 + i * 0.015);
+      club.rotation.x = 0.14;
+      g.add(club);
+    });
+  } else if (def.shape === 'ball') {
+    g = new THREE.Mesh(new THREE.SphereGeometry(0.1, 20, 14),
+      new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.6 }));
+    g.scale.set(1.4, 0.9, 0.9);
+  } else {
+    g = new THREE.Mesh(new THREE.BoxGeometry(...def.size),
+      new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.6 }));
+  }
+  g.userData = { name: def.name, kg: def.kg, h: def.size[1] };
+  return g;
+}
+ITEM_DEFS.forEach((def, i) => {
+  const it = makeItem(def);
+  it.position.set(1.6 + (i % 3) * 0.45, def.size[1] / 2, -0.6 + Math.floor(i / 3) * 0.55);
+  vanRoot.add(it);
+  items.push(it);
+});
+
+// Reticle (placement ring on real surfaces)
+const reticle = new THREE.Mesh(
+  new THREE.RingGeometry(0.14, 0.17, 40).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ color: 0x60a5fa })
+);
+reticle.matrixAutoUpdate = false;
+reticle.visible = false;
+scene.add(reticle);
+
+// ---------- Layout loading ----------
+function loadLayout(name, done) {
+  const def = LAYOUTS[name];
+  const apply = (gltf) => {
+    if (vanModel) vanRoot.remove(vanModel);
+    vanModel = gltf.scene;
+    vanRoot.add(vanModel);
+    currentLayout = name;
+    if (done) done();
+  };
+  if (cache[name]) return apply(cache[name]);
+  loader.load(def.file, (gltf) => { cache[name] = gltf; apply(gltf); },
+    undefined, () => msg('Could not load ' + def.file));
+}
+
+// ---------- Surface and placement helpers (van-local coordinates) ----------
+function surfaceTop(x, z) {
+  let top = 0;
+  for (const s of LAYOUTS[currentLayout].surf) {
+    if (x >= s.x0 && x <= s.x1 && z >= s.z0 && z <= s.z1 && s.top > top) top = s.top;
+  }
+  return top;
+}
+function inCargo(x, z) { return Math.abs(x) <= CARGO.x && z >= CARGO.z0 && z <= CARGO.z1; }
+function seatItem(it) {
+  const p = it.position;
+  p.y = surfaceTop(p.x, p.z) + it.userData.h / 2 + 0.005;
+}
+
+// ---------- Hit test and placement ----------
+let hitSource = null;
+let lastHitValid = false;
+
+renderer.xr.addEventListener('sessionstart', async () => {
+  const session = renderer.xr.getSession();
+  const viewer = await session.requestReferenceSpace('viewer');
+  hitSource = await session.requestHitTestSource({ space: viewer });
+  session.addEventListener('end', () => {
+    hitSource = null; placed = false; world.visible = false; reticle.visible = false;
+    setHud(false); setStatus(false);
+  });
+  placed = false;
+  world.visible = false;
+  msg('Point at the floor, then press the trigger to place the van');
+  setHud(false);
+});
+
+function placeVan(pos) {
+  world.position.copy(pos);
+  // Face the rear doors towards you
+  const cam = new THREE.Vector3();
+  renderer.xr.isPresenting ? camera.getWorldPosition(cam) : cam.set(0, 1.6, 4);
+  world.rotation.set(0, Math.atan2(cam.x - pos.x, cam.z - pos.z), 0);
+  world.visible = true;
+  placed = true;
+  reticle.visible = false;
+  setHud(true); setStatus(true);
+  applyScale();
+  msg('Van placed. Use the buttons to resize, switch layout or move items.');
+}
+
+// ---------- Controllers: place, grab and drop ----------
+const grabbed = new Map();
+const ctrls = [0, 1].map(i => {
+  const c = renderer.xr.getController(i);
+  scene.add(c);
+  c.addEventListener('selectstart', () => onSelectStart(c));
+  c.addEventListener('selectend', () => onSelectEnd(c));
+  return c;
+});
+
+function onSelectStart(c) {
+  if (!placed) {
+    if (reticle.visible) placeVan(new THREE.Vector3().setFromMatrixPosition(reticle.matrix));
+    return;
+  }
+  const p = new THREE.Vector3().setFromMatrixPosition(c.matrixWorld);
+  let best = null, bestD = 0.18;
+  items.forEach(it => {
+    const d = it.getWorldPosition(new THREE.Vector3()).distanceTo(p);
+    if (d < bestD) { bestD = d; best = it; }
+  });
+  if (best) grabbed.set(c, best);
+}
+function onSelectEnd(c) {
+  const it = grabbed.get(c);
+  if (!it) return;
+  grabbed.delete(c);
+  seatItem(it);
+}
+function updateGrab() {
+  grabbed.forEach((it, c) => {
+    const p = new THREE.Vector3().setFromMatrixPosition(c.matrixWorld);
+    it.position.copy(vanRoot.worldToLocal(p));
+  });
+}
+
+// ---------- Scale ----------
+function applyScale() { vanRoot.scale.setScalar(scaleValue); }
+function setScale(s) { scaleValue = Math.min(1, Math.max(0.1, s)); applyScale(); }
+
+// ---------- Saved layouts (this device only) ----------
+const STORE_KEY = 'berlingo-ar-layouts-v1';
+function readStore() {
+  try { return JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); } catch (e) { return {}; }
+}
+function saveLayout() {
+  const store = readStore();
+  store[currentLayout] = items.map(it => ({ n: it.userData.name, p: it.position.toArray() }));
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(store));
+    msg('Saved ' + currentLayout + ' layout on this device');
+  } catch (e) { msg('Could not save on this device'); }
+}
+function loadSavedItems() {
+  const saved = readStore()[currentLayout];
+  if (!saved) return false;
+  saved.forEach(r => {
+    const it = items.find(i => i.userData.name === r.n);
+    if (it) it.position.fromArray(r.p);
+  });
+  return true;
+}
+
+// ---------- Status ----------
+function msg(text) {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.style.display = 'block';
+  clearTimeout(msg.t);
+  msg.t = setTimeout(() => { el.style.display = 'none'; }, 2200);
+}
+function setHud(show) { document.getElementById('hud').style.display = show ? 'flex' : 'none'; }
+function setStatus(show) { document.getElementById('status').style.display = show ? 'block' : 'none'; }
+
+function updateStatus() {
+  if (!placed) return;
+  const L = LAYOUTS[currentLayout];
+  let total = L.kg, looseKg = 0, cx = L.kg * L.centre[0], cz = L.kg * L.centre[1], count = 0, off = 0;
+  items.forEach(it => {
+    const p = it.position;
+    if (inCargo(p.x, p.z)) { looseKg += it.userData.kg; cx += it.userData.kg * p.x; cz += it.userData.kg * p.z; count++; }
+    else off++;
+  });
+  total += looseKg;
+  const cogZ = total ? cz / total : 0, cogX = total ? cx / total : 0;
+  const rear = total ? (cogZ - FRONT_AXLE_Z) / (REAR_AXLE_Z - FRONT_AXLE_Z) * 100 : 0;
+
+  // Headroom: how far your head is below the roof, when you are inside the cargo area
+  const head = new THREE.Vector3();
+  camera.getWorldPosition(head);
+  const local = vanRoot.worldToLocal(head.clone());
+  const realY = local.y / scaleValue;
+  const realX = local.x / scaleValue, realZ = local.z / scaleValue;
+  let headroomLine;
+  if (inCargo(realX, realZ)) headroomLine = `Head clearance here: ${(CEILING_Y - realY).toFixed(2)} m`;
+  else headroomLine = `Step inside to check headroom`;
+  const doorDist = Math.hypot(realX, realZ - CARGO.z1) * 1.0;
+
+  document.getElementById('status').textContent =
+    `${currentLayout}   scale ${Math.round(scaleValue * 100)}%\n` +
+    `Loaded ${looseKg.toFixed(1)} kg, ${count} items in van, ${off} outside\n` +
+    `Total ${total.toFixed(0)} / ${PAYLOAD_KG} kg${total > PAYLOAD_KG ? '  OVER' : ''}\n` +
+    `CoG L/R ${cogX.toFixed(2)} m, F/B ${cogZ.toFixed(2)} m, rear axle ${rear.toFixed(0)}%\n` +
+    `${headroomLine}`;
+}
+
+// ---------- Buttons ----------
+document.querySelectorAll('[data-layout]').forEach(b => b.addEventListener('click', () => {
+  const name = b.dataset.layout;
+  loadLayout(name, () => {
+    if (loadSavedItems()) msg(name + ' layout loaded with your saved items');
+    else msg(name + ' layout');
+    document.querySelectorAll('[data-layout]').forEach(x => x.classList.toggle('on', x === b));
+  });
+}));
+document.getElementById('smaller').onclick = () => setScale(scaleValue - 0.1);
+document.getElementById('bigger').onclick = () => setScale(scaleValue + 0.1);
+document.getElementById('realSize').onclick = () => setScale(1);
+document.getElementById('replace').onclick = () => { placed = false; world.visible = false; setHud(false); setStatus(false); msg('Point at the floor and press the trigger'); };
+document.getElementById('saveBtn').onclick = saveLayout;
+document.getElementById('loadBtn').onclick = () => { if (loadSavedItems()) msg('Saved items loaded'); else msg('Nothing saved for ' + currentLayout); };
+document.getElementById('outside').onclick = () => {
+  items.forEach((it, i) => { it.position.set(1.6 + (i % 3) * 0.45, it.userData.h / 2, -0.6 + Math.floor(i / 3) * 0.55); });
+};
+
+// ---------- Start AR, or desktop preview ----------
+let previewControls = null;
+const overlay = document.getElementById('overlay');
+document.getElementById('startBtn').onclick = async () => {
+  try {
+    const session = await navigator.xr.requestSession('immersive-ar', {
+      requiredFeatures: ['hit-test'],
+      optionalFeatures: ['local-floor', 'dom-overlay', 'hand-tracking'],
+      domOverlay: { root: overlay }
+    });
+    document.getElementById('start').style.display = 'none';
+    await renderer.xr.setSession(session);
+    loadLayout('Bed');
+  } catch (e) {
+    msg('Could not start AR: ' + e.message);
+  }
+};
+document.getElementById('previewBtn').onclick = () => startPreview();
+
+async function checkXR() {
+  const ok = navigator.xr && await navigator.xr.isSessionSupported('immersive-ar').catch(() => false);
+  if (!ok) document.getElementById('noxr').style.display = 'block';
+}
+checkXR();
+
+function startPreview() {
+  document.getElementById('start').style.display = 'none';
+  previewControls = new OrbitControls(camera, renderer.domElement);
+  camera.position.set(3.5, 2.2, 4.5);
+  previewControls.target.set(0, 0.6, 0);
+  previewControls.update();
+  placeVan(new THREE.Vector3(0, 0, 0));
+  loadLayout('Bed');
+  renderer.setAnimationLoop(loop);
+}
+
+// ---------- Loop ----------
+let frameN = 0;
+function loop(t, frame) {
+  if (renderer.xr.isPresenting && frame && hitSource && !placed) {
+    const hits = frame.getHitTestResults(hitSource);
+    if (hits.length) {
+      const pose = hits[0].getPose(renderer.xr.getReferenceSpace());
+      reticle.matrix.fromArray(pose.transform.matrix);
+      reticle.visible = true;
+      lastHitValid = true;
+    } else { reticle.visible = false; lastHitValid = false; }
+  }
+  updateGrab();
+  if (previewControls) previewControls.update();
+  if ((frameN++ % 10) === 0) updateStatus();
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(loop);
+
+// Hint text for the desktop preview keyboard shortcut
+addEventListener('keydown', e => {
+  if (e.key === '1') document.querySelector('[data-layout="Bed"]').click();
+  if (e.key === '2') document.querySelector('[data-layout="Lounge"]').click();
+  if (e.key === '3') document.querySelector('[data-layout="Packed"]').click();
+});
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
