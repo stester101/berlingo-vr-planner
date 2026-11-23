@@ -123,7 +123,10 @@ scene.add(sun.target);
 
 const world = new THREE.Group();     // the placed anchor: position + facing
 world.visible = false;
-scene.add(world);
+// stage = everything you walk around (van, items, driveway). Moving/turning it is how you move in VR and AR.
+const stage = new THREE.Group();
+scene.add(stage);
+stage.add(world);
 const vanRoot = new THREE.Group();   // van + items, scaled together
 world.add(vanRoot);
 // Shadow catcher: invisible floor that only shows the van's shadow on your real floor
@@ -145,7 +148,7 @@ vanRoot.add(fill);
 // ---------- VR / preview surroundings: sky, ground and a driveway pad (hidden in AR) ----------
 let xrMode = 'none';                 // 'ar', 'vr' or 'none' (desktop preview)
 const env = new THREE.Group();
-scene.add(env);
+stage.add(env);
 const skyCanvas = document.createElement('canvas');
 skyCanvas.width = 4; skyCanvas.height = 512;
 {
@@ -167,6 +170,7 @@ env.add(pad);
 
 function setMode(mode) {
   xrMode = mode;
+  if (typeof stage !== 'undefined') { stage.position.set(0, 0, 0); stage.rotation.set(0, 0, 0); }
   const ar = mode === 'ar';
   env.visible = !ar;
   shadowFloor.visible = ar;
@@ -446,7 +450,7 @@ function seatItem(it) {
   const s = vanRoot.scale.x;
   const wp = vanRoot.localToWorld(it.position.clone());
   let top = realTopAt(wp.x, wp.y, wp.z, 0.15);
-  if (top === null) top = world.position.y;               // no real surface found: the floor you placed the van on
+  if (top === null) top = world.getWorldPosition(new THREE.Vector3()).y;   // no real surface found: the floor you placed the van on
   const lx = it.position.x, lz = it.position.z;
   if (inCargo(lx, lz)) {
     const vt = vanRoot.localToWorld(new THREE.Vector3(lx, surfaceTop(lx, lz), lz)).y;
@@ -470,7 +474,7 @@ renderer.xr.addEventListener('sessionstart', async () => {
   if (xrMode === 'vr') {
     // VR: the van appears on the driveway in front of you, rear doors facing you
     placeVan(new THREE.Vector3(0, 0, -3.4));
-    msg('Left stick to walk. Point and pull the trigger to use the panels and move items.');
+    msg('Left stick: walk. Right stick: turn. Point at the ground + trigger (or pinch): teleport.');
     return;
   }
   const viewer = await session.requestReferenceSpace('viewer');
@@ -482,7 +486,9 @@ renderer.xr.addEventListener('sessionstart', async () => {
 });
 
 function placeVan(pos) {
-  world.position.copy(pos);
+  stage.updateMatrixWorld(true);
+  world.position.copy(stage.worldToLocal(pos.clone()));
+  pos = world.position;
   // Face the rear doors towards you
   const cam = new THREE.Vector3();
   if (renderer.xr.isPresenting && xrMode === 'ar') camera.getWorldPosition(cam); else cam.set(0, 1.6, 4);
@@ -522,7 +528,10 @@ function onSelectStart(c) {
     const d = it.getWorldPosition(new THREE.Vector3()).distanceTo(p);
     if (d < bestD) { bestD = d; best = it; }
   });
-  if (best) grabbed.set(c, best);
+  if (best) { grabbed.set(c, best); return; }
+  // Nothing in reach: if pointing at the ground, teleport there
+  const g = groundHit(c);
+  if (g) teleportTo(g);
 }
 function onSelectEnd(c) {
   const it = grabbed.get(c);
@@ -922,25 +931,69 @@ checkXR();
 
 // VR walking: left thumbstick moves you where you are looking (the reference space is shifted)
 const _fwd = new THREE.Vector3(), _right = new THREE.Vector3();
+// ---------- Moving around (VR and AR) ----------
+// Left stick: walk where you look. Right stick: snap turn 30 degrees (left/right), smooth up/down is ignored.
+// Teleport: point at the ground and pull the trigger (works with hand pinch too).
+// All of it moves the stage the opposite way, which is the same as you moving.
+const _sunP = new THREE.Vector3(), _head = new THREE.Vector3();
+let snapReady = true;
+function headPos() { (renderer.xr.isPresenting ? renderer.xr.getCamera() : camera).getWorldPosition(_head); return _head; }
+function moveUser(dx, dz) { stage.position.x -= dx; stage.position.z -= dz; }
+function turnUser(angle) {          // turn yourself by angle (radians, + = left) around your head
+  const h = headPos().clone();
+  stage.position.sub(h).applyAxisAngle(new THREE.Vector3(0, 1, 0), -angle).add(h);
+  stage.rotation.y -= angle;
+}
 function vrLocomotion(dt) {
   const session = renderer.xr.getSession();
-  if (!session || xrMode !== 'vr') return;
-  let mx = 0, mz = 0;
+  if (!session || !placed) return;
+  let mx = 0, mz = 0, tx = 0;
   for (const src of session.inputSources) {
-    if (!src.gamepad || src.handedness !== 'left') continue;
+    if (!src.gamepad) continue;
     const a = src.gamepad.axes;
-    mx = a[2] || 0; mz = a[3] || 0;
+    // Quest thumbsticks are axes 2/3; some browsers report them as 0/1
+    const sx = a.length >= 4 ? a[2] : (a[0] || 0), sy = a.length >= 4 ? a[3] : (a[1] || 0);
+    if (src.handedness === 'left') { mx = sx; mz = sy; }
+    if (src.handedness === 'right') { tx = sx; }
   }
+  if (Math.abs(tx) > 0.7 && snapReady) { turnUser(tx > 0 ? -Math.PI / 6 : Math.PI / 6); snapReady = false; }
+  if (Math.abs(tx) < 0.3) snapReady = true;
   if (Math.abs(mx) < 0.15) mx = 0;
   if (Math.abs(mz) < 0.15) mz = 0;
   if (!mx && !mz) return;
-  const xrCam = renderer.xr.getCamera();
-  xrCam.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
+  renderer.xr.getCamera().getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
   _right.set(-_fwd.z, 0, _fwd.x);
-  const speed = 1.4 * dt;
-  const dx = (_fwd.x * -mz + _right.x * mx) * speed, dz = (_fwd.z * -mz + _right.z * mx) * speed;
-  const ref = renderer.xr.getReferenceSpace();
-  renderer.xr.setReferenceSpace(ref.getOffsetReferenceSpace(new XRRigidTransform({ x: dx, y: 0, z: dz, w: 1 })));
+  const speed = 1.6 * dt;
+  moveUser((_fwd.x * -mz + _right.x * mx) * speed, (_fwd.z * -mz + _right.z * mx) * speed);
+}
+
+// Teleport target: a ring on the ground where the controller points (when not pointing at a panel or item)
+const tpMarker = new THREE.Mesh(new THREE.RingGeometry(0.18, 0.24, 40).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ color: 0x5eead4, transparent: true, opacity: 0.9, depthTest: false }));
+tpMarker.renderOrder = 20; tpMarker.visible = false;
+scene.add(tpMarker);
+const _gp = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), _hit = new THREE.Vector3();
+function groundHit(c) {
+  const ray = rayFromController(c).ray;
+  _gp.constant = -world.getWorldPosition(new THREE.Vector3()).y;      // the floor the van stands on
+  if (!ray.intersectPlane(_gp, _hit)) return null;
+  if (_hit.distanceTo(ray.origin) > 12) return null;
+  return _hit.clone();
+}
+function updateTeleportMarker() {
+  tpMarker.visible = false;
+  if (!renderer.xr.isPresenting || !placed) return;
+  for (const c of ctrls) {
+    if (!c.visible || grabbed.has(c)) continue;
+    panelGroup.updateMatrixWorld(true);
+    if (hitPanels(rayFromController(c))) continue;
+    const g = groundHit(c);
+    if (g) { tpMarker.position.copy(g); tpMarker.visible = true; return; }
+  }
+}
+function teleportTo(p) {
+  const h = headPos();
+  moveUser(p.x - h.x, p.z - h.z);
 }
 
 function startPreview() {
@@ -975,8 +1028,10 @@ function loop(t, frame) {
   if (t - lastStatusT >= 200) { lastStatusT = t; updateStatus(); }   // about 5 times a second
   updatePanels(performance.now());
   // Keep the sun's shadow box centred on the van wherever it was placed
-  sun.target.position.copy(world.position);
-  sun.position.set(world.position.x + 3, world.position.y + 6, world.position.z + 4);
+  const wpos = world.getWorldPosition(_sunP);
+  sun.target.position.copy(wpos);
+  sun.position.set(wpos.x + 3, wpos.y + 6, wpos.z + 4);
+  updateTeleportMarker();
   renderer.render(scene, camera);
 }
 renderer.setAnimationLoop(loop);
@@ -989,6 +1044,13 @@ addEventListener('keydown', e => {
   // Desktop preview cameras: I = inside through the rear doors, O = outside three-quarter view
   if (previewControls && (e.key === 'i' || e.key === 'I')) {
     camera.position.set(0.15, 1.35, 2.05); previewControls.target.set(0, 0.95, -0.2); previewControls.update();
+  }
+  // Desktop preview walking: W/A/S/D moves you (camera and its pivot together)
+  if (previewControls && 'wasdWASD'.includes(e.key) && e.key.length === 1) {
+    const f = new THREE.Vector3(); camera.getWorldDirection(f); f.y = 0; f.normalize();
+    const r = new THREE.Vector3(-f.z, 0, f.x), k = e.key.toLowerCase(), d = new THREE.Vector3();
+    if (k === 'w') d.copy(f); if (k === 's') d.copy(f).negate(); if (k === 'a') d.copy(r).negate(); if (k === 'd') d.copy(r);
+    d.multiplyScalar(0.3); camera.position.add(d); previewControls.target.add(d); previewControls.update();
   }
   if (previewControls && (e.key === 'o' || e.key === 'O')) {
     camera.position.set(3.5, 2.2, 4.5); previewControls.target.set(0, 0.6, 0); previewControls.update();
