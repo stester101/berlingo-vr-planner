@@ -3,52 +3,40 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Berlingo AR planner</title>
+<title>Berlingo planner</title>
 <style>
   :root { color-scheme: dark; }
   html, body { margin: 0; height: 100%; background: #111; color: #fff; font-family: system-ui, sans-serif; overflow: hidden; }
   #overlay { position: fixed; inset: 0; pointer-events: none; }
-  #start { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: #111; pointer-events: auto; }
-  #start h1 { font-size: 24px; margin: 0; }
-  #start p { margin: 0; color: #cbd5e1; max-width: 420px; line-height: 1.4; }
-  button { font: inherit; border: 0; border-radius: 12px; background: #334155; color: #fff; padding: 12px 14px; font-size: 16px; pointer-events: auto; touch-action: manipulation; }
-  button.primary { background: #2563eb; font-size: 20px; padding: 16px 24px; }
-  button.on { background: #2563eb; }
-  #status { position: fixed; top: 12px; left: 12px; right: 12px; background: rgba(0,0,0,.62); padding: 10px 12px; border-radius: 12px; font-size: 14px; line-height: 1.45; white-space: pre-line; display: none; }
-  #hud { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px; background: rgba(0,0,0,.62); display: none; flex-wrap: wrap; gap: 8px; justify-content: center; pointer-events: none; }
-  #hud .row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; width: 100%; }
+  #start { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; background: radial-gradient(ellipse at 50% 0%, #1e293b 0%, #0b1020 60%, #05070d 100%); pointer-events: auto; }
+  #start .card { width: min(440px, 100%); box-sizing: border-box; padding: 40px 32px 28px; border-radius: 28px; background: rgba(15,23,42,.72); border: 1px solid rgba(148,163,184,.22); box-shadow: 0 24px 80px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06); display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  #start h1 { font-size: clamp(34px, 9vw, 46px); line-height: 1.05; margin: 0; letter-spacing: -.02em; background: linear-gradient(180deg, #fff, #94a3b8); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #start p { margin: 0; color: #cbd5e1; max-width: 360px; line-height: 1.5; font-size: 16px; }
+  #start p.small { color: #94a3b8; font-size: 14px; }
+  button { font: inherit; border: 0; border-radius: 14px; background: #334155; color: #fff; padding: 12px 16px; font-size: 16px; pointer-events: auto; touch-action: manipulation; cursor: pointer; }
+  button.primary { width: 100%; background: linear-gradient(180deg, #3b82f6, #2563eb); font-size: 22px; font-weight: 600; padding: 18px 24px; border-radius: 18px; box-shadow: 0 0 0 1px rgba(147,197,253,.4), 0 0 28px rgba(59,130,246,.55), 0 10px 30px rgba(37,99,235,.35); transition: box-shadow .2s, transform .1s; }
+  button.primary:hover { box-shadow: 0 0 0 1px rgba(191,219,254,.7), 0 0 44px rgba(96,165,250,.8), 0 10px 30px rgba(37,99,235,.45); }
+  button.primary:active { transform: scale(.98); }
+  button.primary.alt { background: linear-gradient(180deg, #14b8a6, #0f766e); box-shadow: 0 0 0 1px rgba(94,234,212,.4), 0 0 28px rgba(20,184,166,.45), 0 10px 30px rgba(15,118,110,.35); }
+  button.primary:disabled { opacity: .35; box-shadow: none; cursor: default; }
+  button.ghost { background: transparent; color: #94a3b8; border: 1px solid rgba(148,163,184,.3); font-size: 14px; padding: 9px 16px; }
+  button.ghost:hover { color: #e2e8f0; border-color: rgba(148,163,184,.6); }
   #msg { position: fixed; left: 50%; top: 45%; transform: translate(-50%, -50%); background: rgba(0,0,0,.75); padding: 10px 14px; border-radius: 10px; display: none; font-size: 15px; pointer-events: none; }
 </style>
 </head>
 <body>
 <div id="overlay">
   <div id="start">
-    <h1>Berlingo AR planner</h1>
-    <p>Puts the van in your room at real size. On Quest, tap "Start AR", then point at the floor and press the trigger to place the van.</p>
-    <button class="primary" id="startBtn">Start AR</button>
-    <p id="noxr" style="display:none">AR is not available in this browser. Open this page in the Meta Quest Browser.</p>
-    <button id="previewBtn">Desktop preview</button>
+    <div class="card">
+      <h1>Berlingo planner</h1>
+      <p><b>AR</b> puts the van in your room: point at the floor and pull the trigger. <b>VR</b> parks it on a driveway: walk round it with the left stick.</p>
+      <button class="primary" id="startBtn">Start AR</button>
+      <button class="primary alt" id="vrBtn">Start VR</button>
+      <p class="small" id="noxr" style="display:none">AR and VR need a headset. Open this page in the Meta Quest Browser.</p>
+      <button class="ghost" id="previewBtn">Desktop preview</button>
+    </div>
   </div>
-  <div id="status"></div>
   <div id="msg"></div>
-  <div id="hud">
-    <div class="row">
-      <button data-layout="Bed">Bed</button>
-      <button data-layout="Lounge">Lounge</button>
-      <button data-layout="Packed">Packed</button>
-    </div>
-    <div class="row">
-      <button id="smaller">Smaller</button>
-      <button id="bigger">Bigger</button>
-      <button id="realSize">Real size</button>
-      <button id="replace">Move van</button>
-    </div>
-    <div class="row">
-      <button id="saveBtn">Save layout</button>
-      <button id="loadBtn">Load layout</button>
-      <button id="outside">Items outside</button>
-    </div>
-  </div>
 </div>
 
 <script type="importmap">
@@ -62,11 +50,14 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 // ---------- CONFIG (metres / kg). Placeholders until you measure ----------
 const PAYLOAD_KG = 600;
 const FRONT_AXLE_Z = -1.35, REAR_AXLE_Z = 1.35;   // wheelbase 2.7 m, van centre at 0
-const CEILING_Y = 1.62;                           // inside roof height above ground (from the model)
+const CEILING_Y = 1.735;
+const MODEL_VERSION = 'v4';                       // bump when the Blender models change, so headsets don't use stale copies                          // inside roof height above ground (from the model)
 const CARGO = { x: 0.75, z0: -0.4, z1: 2.2 };     // load area: bulkhead to rear doors
 
 // Layouts: same surfaces as the desktop planner (A-Frame z = glTF z; front is -z)
@@ -98,7 +89,13 @@ const ITEM_DEFS = [
 ];
 
 // ---------- Scene ----------
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// alpha: true so the Quest's passthrough camera shows behind the van in AR
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setClearColor(0x000000, 0);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
@@ -108,16 +105,75 @@ renderer.domElement.style.inset = '0';
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 50);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 2.2));
-const sun = new THREE.DirectionalLight(0xffffff, 1.6);
-sun.position.set(2, 4, 3);
+// Image-based lighting: soft studio reflections on paint, glass and chrome
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 0.6));
+const sun = new THREE.DirectionalLight(0xfff4e5, 2.2);
+sun.position.set(3, 6, 4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -4; sun.shadow.camera.right = 4;
+sun.shadow.camera.top = 4; sun.shadow.camera.bottom = -4;
+sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 20;
+sun.shadow.bias = -0.0005;
+sun.shadow.radius = 4;
 scene.add(sun);
+scene.add(sun.target);
 
 const world = new THREE.Group();     // the placed anchor: position + facing
 world.visible = false;
 scene.add(world);
 const vanRoot = new THREE.Group();   // van + items, scaled together
 world.add(vanRoot);
+// Shadow catcher: invisible floor that only shows the van's shadow on your real floor
+const shadowFloor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12).rotateX(-Math.PI / 2),
+  new THREE.ShadowMaterial({ opacity: 0.38 }));
+shadowFloor.receiveShadow = true;
+shadowFloor.position.y = 0.002;
+world.add(shadowFloor);
+// Warm interior lights under the ceiling LED strip, so the cargo area isn't a dark box
+[0.3, 1.4].forEach(z => {
+  const l = new THREE.PointLight(0xffd9a8, 0.9, 3.0, 1.8);
+  l.position.set(0, 1.62, z);
+  vanRoot.add(l);
+});
+const fill = new THREE.PointLight(0xffffff, 0.5, 4, 2);   // soft fill from the rear doors
+fill.position.set(0, 1.3, 2.6);
+vanRoot.add(fill);
+
+// ---------- VR / preview surroundings: sky, ground and a driveway pad (hidden in AR) ----------
+let xrMode = 'none';                 // 'ar', 'vr' or 'none' (desktop preview)
+const env = new THREE.Group();
+scene.add(env);
+const skyCanvas = document.createElement('canvas');
+skyCanvas.width = 4; skyCanvas.height = 512;
+{
+  const c = skyCanvas.getContext('2d'), g = c.createLinearGradient(0, 0, 0, 512);
+  g.addColorStop(0, '#5b8cc9'); g.addColorStop(0.46, '#bcd3ea'); g.addColorStop(0.5, '#e8eef2'); g.addColorStop(1, '#6b7a5a');
+  c.fillStyle = g; c.fillRect(0, 0, 4, 512);
+}
+const skyTex = new THREE.CanvasTexture(skyCanvas);
+skyTex.mapping = THREE.EquirectangularReflectionMapping;
+skyTex.colorSpace = THREE.SRGBColorSpace;
+const ground = new THREE.Mesh(new THREE.CircleGeometry(40, 64).rotateX(-Math.PI / 2),
+  new THREE.MeshStandardMaterial({ color: 0x55663f, roughness: 1 }));
+ground.receiveShadow = true;
+env.add(ground);
+const pad = new THREE.Mesh(new THREE.PlaneGeometry(5.5, 8).rotateX(-Math.PI / 2),
+  new THREE.MeshStandardMaterial({ color: 0x3f4246, roughness: 0.95 }));
+pad.position.y = 0.004; pad.receiveShadow = true;
+env.add(pad);
+
+function setMode(mode) {
+  xrMode = mode;
+  const ar = mode === 'ar';
+  env.visible = !ar;
+  shadowFloor.visible = ar;
+  scene.background = ar ? null : skyTex;
+  scene.fog = ar ? null : new THREE.Fog(0xe8eef2, 18, 45);
+}
+setMode('none');
 
 const loader = new GLTFLoader();
 const cache = {};
@@ -128,28 +184,112 @@ let placed = false;
 
 // Items
 const items = [];
-function makeItem(def) {
-  let g;
-  if (def.shape === 'golf') {
-    g = new THREE.Group();
-    const bag = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.10, 0.9, 16),
-      new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.8 }));
-    g.add(bag);
-    [0xe5e7eb, 0x9ca3af, 0xf5f5f4, 0xd1d5db].forEach((c, i) => {
-      const club = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.9, 8),
-        new THREE.MeshStandardMaterial({ color: c, metalness: 0.6, roughness: 0.3 }));
-      club.position.set(-0.03 + i * 0.02, 0.25, -0.02 + i * 0.015);
-      club.rotation.x = 0.14;
-      g.add(club);
+// ---------- Item models: built from simple parts, each centred on its own middle ----------
+const mat = (color, rough = 0.6, metal = 0, extra = {}) =>
+  new THREE.MeshStandardMaterial(Object.assign({ color, roughness: rough, metalness: metal }, extra));
+const rbox = (w, h, d, r, m) => new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 4, Math.min(r, w / 2, h / 2, d / 2)), m);
+const cylm = (rt, rb, h, m, seg = 32) => new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), m);
+const at = (o, x, y, z) => { o.position.set(x, y, z); return o; };
+
+const BUILDERS = {
+  'Water 20L': () => {            // blue jerrycan with moulded handle and cap
+    const g = new THREE.Group(), plastic = mat(0x2563eb, 0.35, 0, { transparent: true, opacity: 0.92 });
+    g.add(rbox(0.30, 0.34, 0.20, 0.04, plastic));
+    const handle = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.016, 10, 24, Math.PI), plastic);
+    g.add(at(handle, -0.05, 0.17, 0));
+    g.add(at(cylm(0.025, 0.025, 0.04, mat(0xf8fafc, 0.5)), 0.09, 0.19, 0));
+    return g;
+  },
+  'Stove': () => {                 // camping stove: case, grates, two burners, knobs
+    const g = new THREE.Group();
+    g.add(rbox(0.40, 0.10, 0.35, 0.015, mat(0x1f2937, 0.4, 0.5)));
+    [-0.09, 0.09].forEach(x => {
+      g.add(at(cylm(0.055, 0.055, 0.012, mat(0x111827, 0.3, 0.8)), x, 0.055, -0.02));
+      const grate = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.005, 6, 32), mat(0x6b7280, 0.3, 0.9));
+      grate.rotation.x = Math.PI / 2; g.add(at(grate, x, 0.065, -0.02));
+      const knob = at(cylm(0.015, 0.015, 0.02, mat(0xef4444, 0.4)), x, -0.01, 0.18);
+      knob.rotation.x = Math.PI / 2; g.add(knob);
     });
-  } else if (def.shape === 'ball') {
-    g = new THREE.Mesh(new THREE.SphereGeometry(0.1, 20, 14),
-      new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.6 }));
-    g.scale.set(1.4, 0.9, 0.9);
-  } else {
-    g = new THREE.Mesh(new THREE.BoxGeometry(...def.size),
-      new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.6 }));
+    return g;
+  },
+  'Gas bottle': () => {            // cylinder with domed shoulder, shroud and valve
+    const g = new THREE.Group(), red = mat(0xb91c1c, 0.35, 0.3);
+    const pts = [[0, -0.2], [0.14, -0.2], [0.15, -0.18], [0.15, 0.08], [0.13, 0.13], [0.07, 0.16], [0.04, 0.165], [0, 0.165]]
+      .map(p => new THREE.Vector2(p[0], p[1]));
+    g.add(new THREE.Mesh(new THREE.LatheGeometry(pts, 40), red));
+    g.add(at(cylm(0.075, 0.075, 0.035, mat(0x9ca3af, 0.3, 0.9), 24), 0, 0.185, 0));
+    g.add(at(cylm(0.15, 0.15, 0.02, mat(0x111827, 0.6)), 0, -0.19, 0));
+    return g;
+  },
+  'Tools bag': () => {             // canvas tool bag with webbing and handles
+    const g = new THREE.Group(), canvas = mat(0x3f6212, 0.95), web = mat(0x111827, 0.8);
+    g.add(rbox(0.40, 0.22, 0.25, 0.05, canvas));
+    [-0.12, 0.12].forEach(x => g.add(at(rbox(0.03, 0.225, 0.255, 0.01, web), x, 0, 0)));
+    const h = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.012, 8, 24, Math.PI), web);
+    g.add(at(h, 0, 0.11, 0));
+    return g;
+  },
+  'Cool box': () => {              // white body, blue lid, side handles
+    const g = new THREE.Group();
+    g.add(at(rbox(0.50, 0.28, 0.35, 0.03, mat(0xf1f5f9, 0.4)), 0, -0.03, 0));
+    g.add(at(rbox(0.52, 0.07, 0.37, 0.03, mat(0x0284c7, 0.35)), 0, 0.14, 0));
+    [-0.26, 0.26].forEach(x => g.add(at(rbox(0.03, 0.04, 0.14, 0.01, mat(0x475569, 0.5)), x, 0.06, 0)));
+    return g;
+  },
+  'Crate': () => {                 // folding storage crate with ribs
+    const g = new THREE.Group(), pl = mat(0x475569, 0.55);
+    g.add(rbox(0.40, 0.28, 0.25, 0.02, pl));
+    g.add(at(rbox(0.42, 0.03, 0.27, 0.01, mat(0x334155, 0.5)), 0, 0.14, 0));
+    for (let i = -2; i <= 2; i++) g.add(at(rbox(0.012, 0.24, 0.255, 0.004, mat(0x334155, 0.5)), i * 0.075, -0.01, 0));
+    return g;
+  },
+  'Spare pillow': () => {          // soft rounded pillow
+    const p = rbox(0.45, 0.12, 0.30, 0.055, mat(0xf8fafc, 0.95));
+    p.scale.set(1, 1, 1);
+    return p;
+  },
+  'Football': () => {              // american football with laces and stripes
+    const g = new THREE.Group();
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.08, 32, 20), mat(0x7c2d12, 0.55));
+    ball.scale.set(1.75, 1, 1); g.add(ball);
+    [-0.09, 0.09].forEach(x => {
+      const s = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.006, 8, 32), mat(0xf8fafc, 0.6));
+      s.rotation.y = Math.PI / 2; g.add(at(s, x, 0, 0));
+    });
+    g.add(at(rbox(0.07, 0.006, 0.006, 0.002, mat(0xf8fafc, 0.6)), 0, 0.081, 0));
+    for (let i = -3; i <= 3; i++) g.add(at(rbox(0.004, 0.006, 0.02, 0.001, mat(0xf8fafc, 0.6)), i * 0.01, 0.081, 0));
+    return g;
+  },
+  'Golf bag': () => {              // stand bag with collar, strap, legs and a full set of clubs
+    const g = new THREE.Group(), navy = mat(0x1e3a8a, 0.7), black = mat(0x0f172a, 0.6), chrome = mat(0xd1d5db, 0.2, 1);
+    g.add(at(cylm(0.11, 0.10, 0.78, navy, 40), 0, -0.07, 0));
+    g.add(at(cylm(0.125, 0.125, 0.07, black, 40), 0, 0.32, 0));
+    g.add(at(cylm(0.105, 0.105, 0.06, black, 40), 0, -0.445, 0));
+    g.add(at(rbox(0.06, 0.40, 0.03, 0.01, mat(0x0f172a, 0.6)), 0, 0.0, 0.11));                // pocket
+    const strap = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.015, 8, 30, Math.PI * 0.8), black);
+    strap.rotation.z = Math.PI / 2; g.add(at(strap, -0.12, 0.0, 0));
+    [-0.06, 0.06].forEach(z => {                                                                 // stand legs
+      const leg = cylm(0.007, 0.007, 0.75, chrome, 8);
+      leg.rotation.x = z * 1.5; g.add(at(leg, -0.13, -0.08, z));
+    });
+    // clubs: woods with headcovers, irons with blades, putter
+    const shaft = (x, z, len) => g.add(at(cylm(0.005, 0.005, len, chrome, 8), x, 0.32 + len / 2 - 0.1, z));
+    [[-0.05, -0.04], [0.0, -0.06], [0.05, -0.04]].forEach(([x, z], i) => {
+      shaft(x, z, 0.32);
+      const cover = new THREE.Mesh(new THREE.SphereGeometry(0.045, 20, 14), mat([0xdc2626, 0xf8fafc, 0x111827][i], 0.8));
+      cover.scale.set(1, 1.35, 0.9); g.add(at(cover, x, 0.62, z));
+    });
+    for (let i = 0; i < 7; i++) {
+      const x = -0.06 + (i % 4) * 0.04, z = 0.0 + Math.floor(i / 4) * 0.045;
+      shaft(x, z, 0.26);
+      g.add(at(rbox(0.05, 0.035, 0.01, 0.004, chrome), x + 0.02, 0.5, z));
+    }
+    return g;
   }
+};
+
+function makeItem(def) {
+  const g = BUILDERS[def.name] ? BUILDERS[def.name]() : rbox(...def.size, 0.02, mat(def.color));
   g.userData = { name: def.name, kg: def.kg, h: def.size[1] };
   return g;
 }
@@ -157,6 +297,7 @@ ITEM_DEFS.forEach((def, i) => {
   const it = makeItem(def);
   it.position.set(1.6 + (i % 3) * 0.45, def.size[1] / 2, -0.6 + Math.floor(i / 3) * 0.55);
   vanRoot.add(it);
+  it.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   items.push(it);
 });
 
@@ -169,18 +310,73 @@ reticle.matrixAutoUpdate = false;
 reticle.visible = false;
 scene.add(reticle);
 
+// ---------- Procedural textures for the Blender materials (wood grain, fabric, ribbed rubber, paint) ----------
+function canvasTex(size, draw, repeat = 1) {
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  draw(c.getContext('2d'), size);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repeat, repeat);
+  t.anisotropy = 8;
+  return t;
+}
+const rand = (() => { let s = 7; return () => (s = (s * 16807) % 2147483647) / 2147483647; })();
+const TEX = {
+  wood: canvasTex(512, (g, n) => {             // ply grain: long soft bands with fine streaks
+    g.fillStyle = '#fff'; g.fillRect(0, 0, n, n);
+    for (let i = 0; i < 90; i++) {
+      const y = rand() * n, a = 0.04 + rand() * 0.10, w = 1 + rand() * 6;
+      g.strokeStyle = `rgba(120,80,40,${a})`; g.lineWidth = w; g.beginPath();
+      g.moveTo(0, y);
+      for (let x = 0; x <= n; x += 32) g.lineTo(x, y + Math.sin(x / 90 + i) * 6 + (rand() - 0.5) * 3);
+      g.stroke();
+    }
+  }, 2),
+  fabric: canvasTex(256, (g, n) => {            // woven upholstery: fine cross-hatch noise
+    g.fillStyle = '#fff'; g.fillRect(0, 0, n, n);
+    for (let y = 0; y < n; y += 2) for (let x = 0; x < n; x += 2) {
+      const v = 200 + rand() * 55 | 0; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(x, y, 2, 2);
+    }
+  }, 6),
+  rubber: canvasTex(256, (g, n) => {            // ribbed load mat
+    g.fillStyle = '#fff'; g.fillRect(0, 0, n, n);
+    for (let y = 0; y < n; y += 16) { g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(0, y, n, 6); }
+  }, 6),
+  felt: canvasTex(256, (g, n) => {              // headliner felt: soft speckle
+    g.fillStyle = '#fff'; g.fillRect(0, 0, n, n);
+    for (let i = 0; i < 6000; i++) { g.fillStyle = `rgba(0,0,0,${rand() * 0.07})`; g.fillRect(rand() * n, rand() * n, 2, 2); }
+  }, 4)
+};
+function dressMaterial(m) {
+  const n = (m.name || '').toLowerCase();
+  if ('envMapIntensity' in m) m.envMapIntensity = 1.0;
+  if (/ply|pine|slat|cupboard|table top/.test(n)) { m.map = TEX.wood; m.roughness = 0.55; }
+  else if (/cushion|mattress|pillow|blanket/.test(n)) { m.map = TEX.fabric; m.roughness = 0.95; }
+  else if (/rubber/.test(n)) { m.map = TEX.rubber; m.roughness = 0.9; }
+  else if (/headliner|felt/.test(n)) { m.map = TEX.felt; m.roughness = 1; }
+  else if (/body|paint|silver/.test(n)) { m.metalness = 0.75; m.roughness = 0.32; m.envMapIntensity = 1.3; }
+  else if (/glass/.test(n)) { m.metalness = 0.1; m.roughness = 0.05; m.envMapIntensity = 1.6; }
+  else if (/chrome/.test(n)) { m.metalness = 1; m.roughness = 0.12; m.envMapIntensity = 1.5; }
+  m.needsUpdate = true;
+}
+
 // ---------- Layout loading ----------
 function loadLayout(name, done) {
   const def = LAYOUTS[name];
   const apply = (gltf) => {
     if (vanModel) vanRoot.remove(vanModel);
     vanModel = gltf.scene;
+    vanModel.traverse(o => {
+      if (o.isMesh) {
+        o.castShadow = true; o.receiveShadow = true;
+        if (o.material) dressMaterial(o.material);
+      }
+    });
     vanRoot.add(vanModel);
     currentLayout = name;
     if (done) done();
   };
   if (cache[name]) return apply(cache[name]);
-  loader.load(def.file, (gltf) => { cache[name] = gltf; apply(gltf); },
+  loader.load(def.file + '?v=' + MODEL_VERSION,(gltf) => { cache[name] = gltf; apply(gltf); },
     undefined, () => msg('Could not load ' + def.file));
 }
 
@@ -266,12 +462,19 @@ let lastHitValid = false;
 
 renderer.xr.addEventListener('sessionstart', async () => {
   const session = renderer.xr.getSession();
-  const viewer = await session.requestReferenceSpace('viewer');
-  hitSource = await session.requestHitTestSource({ space: viewer });
   session.addEventListener('end', () => {
     hitSource = null; placed = false; world.visible = false; reticle.visible = false;
-    setHud(false); setStatus(false);
+    setHud(false); setStatus(false); setMode('none');
+    document.getElementById('start').style.display = '';
   });
+  if (xrMode === 'vr') {
+    // VR: the van appears on the driveway in front of you, rear doors facing you
+    placeVan(new THREE.Vector3(0, 0, -3.4));
+    msg('Left stick to walk. Point and pull the trigger to use the panels and move items.');
+    return;
+  }
+  const viewer = await session.requestReferenceSpace('viewer');
+  hitSource = await session.requestHitTestSource({ space: viewer });
   placed = false;
   world.visible = false;
   msg('Point at the floor, then press the trigger to place the van');
@@ -282,14 +485,16 @@ function placeVan(pos) {
   world.position.copy(pos);
   // Face the rear doors towards you
   const cam = new THREE.Vector3();
-  renderer.xr.isPresenting ? camera.getWorldPosition(cam) : cam.set(0, 1.6, 4);
-  world.rotation.set(0, Math.atan2(cam.x - pos.x, cam.z - pos.z), 0);
+  if (renderer.xr.isPresenting && xrMode === 'ar') camera.getWorldPosition(cam); else cam.set(0, 1.6, 4);
+  world.rotation.set(0, xrMode === 'ar' ? Math.atan2(cam.x - pos.x, cam.z - pos.z) : 0, 0);
+  if (xrMode !== 'ar') env.position.set(pos.x, 0, pos.z);
   world.visible = true;
   placed = true;
+  panelsShownAt = performance.now();
   reticle.visible = false;
   setHud(true); setStatus(true);
   applyScale();
-  msg('Van placed. Use the buttons to resize, switch layout or move items.');
+  msg('Van placed. Use the floating panels to resize, switch layout or move items.');
 }
 
 // ---------- Controllers: place, grab and drop ----------
@@ -307,6 +512,10 @@ function onSelectStart(c) {
     if (reticle.visible) placeVan(new THREE.Vector3().setFromMatrixPosition(reticle.matrix));
     return;
   }
+  // A controller pointing at a floating panel presses its button instead of grabbing
+  panelGroup.updateMatrixWorld(true);
+  const ph = hitPanels(rayFromController(c));
+  if (ph) { if (ph.b) pressButton(ph.P, ph.b); return; }
   const p = new THREE.Vector3().setFromMatrixPosition(c.matrixWorld);
   let best = null, bestD = 0.18;
   items.forEach(it => {
@@ -362,9 +571,11 @@ function msg(text) {
   el.style.display = 'block';
   clearTimeout(msg.t);
   msg.t = setTimeout(() => { el.style.display = 'none'; }, 2200);
+  toast = { text, until: performance.now() + 2600 };   // also shown on the 3D status card
 }
-function setHud(show) { document.getElementById('hud').style.display = show ? 'flex' : 'none'; }
-function setStatus(show) { document.getElementById('status').style.display = show ? 'block' : 'none'; }
+let toast = { text: '', until: 0 };
+function setHud(show) { panelGroup.visible = show; }
+function setStatus(show) { /* the status card is one of the floating panels, shown with them */ }
 
 function updateStatus() {
   if (!placed) return;
@@ -390,60 +601,350 @@ function updateStatus() {
   else headroomLine = `Step inside to check headroom`;
   const doorDist = Math.hypot(realX, realZ - CARGO.z1) * 1.0;
 
-  document.getElementById('status').textContent =
-    `${currentLayout}   scale ${Math.round(scaleValue * 100)}%\n` +
-    `Loaded ${looseKg.toFixed(1)} kg, ${count} items in van, ${off} outside\n` +
-    `Total ${total.toFixed(0)} / ${PAYLOAD_KG} kg${total > PAYLOAD_KG ? '  OVER' : ''}\n` +
-    `CoG L/R ${cogX.toFixed(2)} m, F/B ${cogZ.toFixed(2)} m, rear axle ${rear.toFixed(0)}%\n` +
-    `${headroomLine}\n` +
-    `Room surfaces: ${planeCount ? planeCount + ' found' : 'none yet, look around the room'}`;
+  statusData = {
+    layout: currentLayout, scale: Math.round(scaleValue * 100),
+    loaded: looseKg, count, off, total, over: total > PAYLOAD_KG,
+    cogX, cogZ, rear,
+    head: inCargo(realX, realZ) ? (CEILING_Y - realY).toFixed(2) + ' m' : 'Step inside to check',
+    planes: planeCount ? planeCount + ' found' : 'none yet, look around'
+  };
 }
+let statusData = null;
 
-// ---------- Buttons ----------
-document.querySelectorAll('[data-layout]').forEach(b => b.addEventListener('click', () => {
-  const name = b.dataset.layout;
+// ---------- Actions (same logic the old HTML buttons ran) ----------
+function selectLayout(name) {
   loadLayout(name, () => {
     if (loadSavedItems()) msg(name + ' layout loaded with your saved items');
     else msg(name + ' layout');
-    document.querySelectorAll('[data-layout]').forEach(x => x.classList.toggle('on', x === b));
   });
-}));
-document.getElementById('smaller').onclick = () => setScale(scaleValue - 0.1);
-document.getElementById('bigger').onclick = () => setScale(scaleValue + 0.1);
-document.getElementById('realSize').onclick = () => setScale(1);
-document.getElementById('replace').onclick = () => { placed = false; world.visible = false; setHud(false); setStatus(false); msg('Point at the floor and press the trigger'); };
-document.getElementById('saveBtn').onclick = saveLayout;
-document.getElementById('loadBtn').onclick = () => { if (loadSavedItems()) msg('Saved items loaded'); else msg('Nothing saved for ' + currentLayout); };
-document.getElementById('outside').onclick = () => {
+}
+function doSmaller() { setScale(scaleValue - 0.1); }
+function doBigger() { setScale(scaleValue + 0.1); }
+function doRealSize() { setScale(1); }
+function doReplace() { placed = false; world.visible = false; setHud(false); setStatus(false); msg('Point at the floor and press the trigger'); }
+function doLoadSaved() { if (loadSavedItems()) msg('Saved items loaded'); else msg('Nothing saved for ' + currentLayout); }
+function doItemsOutside() {
   items.forEach((it, i) => { it.position.set(1.6 + (i % 3) * 0.45, it.userData.h / 2, -0.6 + Math.floor(i / 3) * 0.55); });
+}
+
+// ---------- Floating 3D panels (canvas textures on planes) ----------
+const panelGroup = new THREE.Group();
+panelGroup.visible = false;
+scene.add(panelGroup);
+const panels = [], panelMeshes = [];
+let panelsShownAt = 0;
+
+function rr(ctx, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+function makePanel(o) {
+  const cw = o.cw || 1024, ch = o.ch || 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = cw; canvas.height = ch;
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, depthWrite: false, opacity: 0 });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(o.w, o.w * ch / cw), mat);
+  mesh.renderOrder = 10;
+  const P = Object.assign({ buttons: [], extra: null, sig: () => '' }, o,
+    { cw, ch, canvas, ctx: canvas.getContext('2d'), tex, mat, mesh, hover: null, pressed: {}, lastKey: null });
+  mesh.userData.panel = P;
+  panelGroup.add(mesh);
+  panels.push(P); panelMeshes.push(mesh);
+  return P;
+}
+
+function drawPanel(P, now) {
+  const { ctx, cw, ch } = P;
+  ctx.clearRect(0, 0, cw, ch);
+  // dark glass body
+  rr(ctx, 6, 6, cw - 12, ch - 12, 48);
+  const g = ctx.createLinearGradient(0, 0, 0, ch);
+  g.addColorStop(0, 'rgba(30,41,59,0.86)'); g.addColorStop(1, 'rgba(15,23,42,0.82)');
+  ctx.fillStyle = g; ctx.fill();
+  ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(148,163,184,0.30)'; ctx.stroke();
+  // soft top sheen
+  ctx.save(); rr(ctx, 6, 6, cw - 12, ch - 12, 48); ctx.clip();
+  const sh = ctx.createLinearGradient(0, 0, 0, 120);
+  sh.addColorStop(0, 'rgba(255,255,255,0.08)'); sh.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sh; ctx.fillRect(0, 0, cw, 120); ctx.restore();
+  // title
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.font = '600 44px ' + FONT; ctx.fillStyle = '#e2e8f0';
+  ctx.fillText(P.title, 48, 72);
+  if (P.extra) P.extra(ctx, P);
+  P.buttons.forEach(b => drawButton(ctx, P, b, now));
+  P.tex.needsUpdate = true;
+}
+
+function drawButton(ctx, P, b, now) {
+  const hover = P.hover === b.id, pressed = (P.pressed[b.id] || 0) > now, active = b.active ? b.active() : false;
+  const a = b.accent, inset = pressed ? 6 : 0;
+  const x = b.x + inset, y = b.y + inset, w = b.w - inset * 2, h = b.h - inset * 2;
+  rr(ctx, x, y, w, h, 34);
+  ctx.fillStyle = active ? rgba(a, pressed ? 1 : 0.92) : rgba(a, pressed ? 0.55 : hover ? 0.34 : 0.14);
+  ctx.fill();
+  ctx.lineWidth = hover || active ? 5 : 3;
+  ctx.strokeStyle = rgba(a, hover || active || pressed ? 1 : 0.5);
+  ctx.stroke();
+  const fg = active ? '#0b1220' : '#f1f5f9';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const cx = x + w / 2, cy = y + h / 2;
+  ctx.font = '600 ' + (b.fs || 48) + 'px ' + FONT; ctx.fillStyle = fg;
+  ctx.fillText(b.label, cx, b.sub ? cy - 22 : cy);
+  if (b.sub) { ctx.font = '400 32px ' + FONT; ctx.fillStyle = active ? 'rgba(11,18,32,0.7)' : rgba(a, 1); ctx.fillText(b.sub, cx, cy + 36); }
+}
+
+const ACC = {
+  bed: [129, 140, 248], lounge: [45, 212, 191], packed: [251, 191, 36],
+  smaller: [251, 146, 60], real: [56, 189, 248], bigger: [74, 222, 128],
+  save: [74, 222, 128], load: [96, 165, 250], outside: [251, 146, 60], move: [244, 114, 182]
 };
+
+// Layout panel
+const layoutPanel = makePanel({
+  title: 'Layout', w: 0.6, col: 0.36, row: 1.42,
+  sig: () => currentLayout,
+  extra: (ctx) => { ctx.textAlign = 'right'; ctx.font = '400 32px ' + FONT; ctx.fillStyle = '#94a3b8'; ctx.fillText('keys 1 / 2 / 3', 976, 72); },
+  buttons: ['Bed', 'Lounge', 'Packed'].map((n, i) => ({
+    id: n, label: n, sub: LAYOUTS[n].kg + ' kg', x: 40 + i * 327, y: 130, w: 290, h: 330,
+    accent: ACC[n.toLowerCase()], active: () => currentLayout === n, action: () => selectLayout(n)
+  }))
+});
+// Size panel
+const sizePanel = makePanel({
+  title: 'Size', w: 0.6, col: 0.36, row: 1.0,
+  sig: () => Math.round(scaleValue * 100),
+  extra: (ctx) => { ctx.textAlign = 'right'; ctx.font = '700 72px ' + FONT; ctx.fillStyle = '#7dd3fc'; ctx.fillText(Math.round(scaleValue * 100) + '%', 976, 72); },
+  buttons: [
+    { id: 'smaller', label: 'Smaller', accent: ACC.smaller, action: doSmaller },
+    { id: 'real', label: 'Real size', accent: ACC.real, action: doRealSize, active: () => scaleValue === 1 },
+    { id: 'bigger', label: 'Bigger', accent: ACC.bigger, action: doBigger }
+  ].map((b, i) => Object.assign(b, { x: 40 + i * 327, y: 150, w: 290, h: 310 }))
+});
+// Items / actions panel
+const actionsPanel = makePanel({
+  title: 'Items and actions', w: 0.6, col: -0.36, row: 1.0,
+  buttons: [
+    { id: 'save', label: 'Save layout', accent: ACC.save, action: saveLayout },
+    { id: 'load', label: 'Load layout', accent: ACC.load, action: doLoadSaved },
+    { id: 'outside', label: 'Items outside', accent: ACC.outside, action: doItemsOutside },
+    { id: 'move', label: 'Move van', accent: ACC.move, action: doReplace }
+  ].map((b, i) => Object.assign(b, { x: 40 + (i % 2) * 482, y: 130 + Math.floor(i / 2) * 170, w: 462, h: 150, fs: 46 }))
+});
+// Status card
+const statusPanel = makePanel({
+  title: 'Status', w: 0.6, col: -0.36, row: 1.42,
+  sig: () => {
+    const d = statusData, t = performance.now() < toast.until ? toast.text : '';
+    if (!d) return 'none|' + t;
+    return [d.layout, d.scale, d.loaded.toFixed(1), d.count, d.off, d.total.toFixed(0), d.cogX.toFixed(2), d.cogZ.toFixed(2), d.rear.toFixed(0), d.head, d.planes, t].join('|');
+  },
+  extra: (ctx, P) => {
+    const d = statusData;
+    if (!d) { ctx.textAlign = 'left'; ctx.font = '400 38px ' + FONT; ctx.fillStyle = '#94a3b8'; ctx.fillText('Waiting for the van...', 48, 250); return; }
+    ctx.textAlign = 'right'; ctx.font = '500 34px ' + FONT; ctx.fillStyle = '#94a3b8';
+    ctx.fillText(d.layout + '  ' + d.scale + '%', 976, 72);
+    // payload label and bar
+    const frac = d.total / PAYLOAD_KG, col = frac > 1 ? [248, 113, 113] : frac > 0.8 ? [251, 191, 36] : [74, 222, 128];
+    ctx.textAlign = 'left'; ctx.font = '500 32px ' + FONT; ctx.fillStyle = '#94a3b8'; ctx.fillText('Payload', 48, 126);
+    ctx.textAlign = 'right'; ctx.font = '700 38px ' + FONT; ctx.fillStyle = rgba(col, 1);
+    ctx.fillText(d.total.toFixed(0) + ' / ' + PAYLOAD_KG + ' kg' + (d.over ? '  OVER' : ''), 976, 126);
+    rr(ctx, 48, 148, 928, 26, 13); ctx.fillStyle = 'rgba(148,163,184,0.18)'; ctx.fill();
+    rr(ctx, 48, 148, Math.max(26, 928 * Math.min(1, frac)), 26, 13); ctx.fillStyle = rgba(col, 1); ctx.fill();
+    const rows = [
+      ['Loaded', d.loaded.toFixed(1) + ' kg, ' + d.count + ' in van, ' + d.off + ' outside'],
+      ['CoG L/R, F/B', d.cogX.toFixed(2) + ' m, ' + d.cogZ.toFixed(2) + ' m'],
+      ['Rear axle', d.rear.toFixed(0) + '%'],
+      ['Head clearance', d.head],
+      ['Room surfaces', d.planes]
+    ];
+    rows.forEach((r, i) => {
+      const y = 222 + i * 52;
+      if (i) { ctx.fillStyle = 'rgba(148,163,184,0.14)'; ctx.fillRect(48, y - 26, 928, 2); }
+      ctx.textAlign = 'left'; ctx.font = '400 32px ' + FONT; ctx.fillStyle = '#94a3b8'; ctx.fillText(r[0], 48, y);
+      ctx.textAlign = 'right'; ctx.font = '600 34px ' + FONT; ctx.fillStyle = '#f1f5f9'; ctx.fillText(r[1], 976, y);
+    });
+    if (performance.now() < toast.until && toast.text) {
+      ctx.font = '500 30px ' + FONT; const tw = Math.min(900, ctx.measureText(toast.text).width + 56);
+      rr(ctx, 512 - tw / 2, 442, tw, 52, 26); ctx.fillStyle = 'rgba(56,189,248,0.22)'; ctx.fill();
+      ctx.textAlign = 'center'; ctx.fillStyle = '#e0f2fe'; ctx.fillText(toast.text, 512, 469);
+    }
+  }
+});
+
+// Raycasting: controllers (or hand pinch rays) in XR, mouse from the camera on desktop
+const rc = new THREE.Raycaster();
+const mouse = { x: 0, y: 0, inside: false, downX: 0, downY: 0 };
+function rayFromController(c) {
+  rc.ray.origin.setFromMatrixPosition(c.matrixWorld);
+  rc.ray.direction.set(0, 0, -1).transformDirection(c.matrixWorld);
+  return rc;
+}
+function rayFromMouse() { rc.setFromCamera(new THREE.Vector2(mouse.x, mouse.y), camera); return rc; }
+function hitPanels(ray) {
+  for (const h of ray.intersectObjects(panelMeshes, false)) {
+    const P = h.object.userData.panel;
+    if (P.mat.opacity < 0.5 || !h.uv) continue;
+    const px = h.uv.x * P.cw, py = (1 - h.uv.y) * P.ch;
+    const b = P.buttons.find(b => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) || null;
+    return { P, b, dist: h.distance };
+  }
+  return null;
+}
+function pressButton(P, b) {
+  P.pressed[b.id] = performance.now() + 160;
+  b.action();
+}
+
+// Pointer ray lines on the controllers
+const rayLines = ctrls.map(c => {
+  const line = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]),
+    new THREE.LineBasicMaterial({ color: 0x93c5fd, transparent: true, opacity: 0.55 }));
+  line.visible = false;
+  c.add(line);
+  return line;
+});
+
+const renderEl = renderer.domElement;
+renderEl.addEventListener('pointermove', e => {
+  mouse.x = (e.clientX / innerWidth) * 2 - 1; mouse.y = -(e.clientY / innerHeight) * 2 + 1; mouse.inside = true;
+});
+renderEl.addEventListener('pointerleave', () => { mouse.inside = false; });
+renderEl.addEventListener('pointerdown', e => { mouse.downX = e.clientX; mouse.downY = e.clientY; });
+renderEl.addEventListener('click', e => {
+  if (!placed || renderer.xr.isPresenting) return;
+  if (Math.hypot(e.clientX - mouse.downX, e.clientY - mouse.downY) > 5) return;   // it was an orbit drag
+  mouse.x = (e.clientX / innerWidth) * 2 - 1; mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+  panelGroup.updateMatrixWorld(true);
+  const h = hitPanels(rayFromMouse());
+  if (h && h.b) pressButton(h.P, h.b);
+});
+
+const _cam = new THREE.Vector3(), _p = new THREE.Vector3();
+function updatePanels(now) {
+  panelGroup.visible = placed;
+  if (!placed) { rayLines.forEach(l => { l.visible = false; }); return; }
+  world.updateMatrixWorld(true);
+  camera.getWorldPosition(_cam);
+  const s = scaleValue, side = -(0.75 * s + 0.85);   // beside the van (its left), clear of the item area on the right
+  const t = (now - panelsShownAt) / 1000;
+  panels.forEach((P, i) => {
+    _p.set(side, P.row, 0.25 + P.col);
+    world.localToWorld(_p);
+    const k = Math.min(1, Math.max(0, t * 2 - i * 0.3)), e = 1 - Math.pow(1 - k, 3);
+    const bob = Math.sin(now / 1000 * 1.4 + i * 1.3) * 0.012;
+    P.mesh.position.set(_p.x, _p.y + bob - (1 - e) * 0.08, _p.z);
+    P.mesh.rotation.set(0, Math.atan2(_cam.x - _p.x, _cam.z - _p.z), 0);   // billboard: turn around Y only
+    P.mesh.scale.setScalar(0.9 + 0.1 * e);
+    P.mat.opacity = e;
+  });
+  panelGroup.updateMatrixWorld(true);
+
+  // Hover from every pointing source
+  const hov = new Map();
+  rayLines.forEach(l => { l.visible = false; });
+  if (renderer.xr.isPresenting) {
+    ctrls.forEach((c, i) => {
+      if (!c.visible) return;
+      const h = hitPanels(rayFromController(c));
+      rayLines[i].visible = true;
+      rayLines[i].scale.z = h ? h.dist : 0.8;
+      if (h && h.b) hov.set(h.P, h.b.id);
+    });
+  } else if (mouse.inside) {
+    const h = hitPanels(rayFromMouse());
+    if (h && h.b) hov.set(h.P, h.b.id);
+    renderEl.style.cursor = h && h.b ? 'pointer' : '';
+  }
+  // Redraw only panels whose content, hover or pressed state changed
+  panels.forEach(P => {
+    P.hover = hov.get(P) || null;
+    const pr = Object.keys(P.pressed).filter(k => P.pressed[k] > now).join(',');
+    const key = P.sig() + '#' + P.hover + '#' + pr;
+    if (key !== P.lastKey) { P.lastKey = key; drawPanel(P, now); }
+  });
+}
 
 // ---------- Start AR, or desktop preview ----------
 let previewControls = null;
 const overlay = document.getElementById('overlay');
 document.getElementById('startBtn').onclick = async () => {
   try {
+    setMode('ar');
     const session = await navigator.xr.requestSession('immersive-ar', {
       requiredFeatures: ['hit-test'],
       optionalFeatures: ['local-floor', 'dom-overlay', 'hand-tracking', 'plane-detection'],
       domOverlay: { root: overlay }
     });
     document.getElementById('start').style.display = 'none';
+    if (previewControls) { previewControls.dispose(); previewControls = null; }
     await renderer.xr.setSession(session);
-    loadLayout('Bed');
+    loadLayout(currentLayout);
   } catch (e) {
+    setMode('none');
     msg('Could not start AR: ' + e.message);
+  }
+};
+document.getElementById('vrBtn').onclick = async () => {
+  try {
+    setMode('vr');
+    const session = await navigator.xr.requestSession('immersive-vr', {
+      optionalFeatures: ['local-floor', 'hand-tracking']
+    });
+    document.getElementById('start').style.display = 'none';
+    if (previewControls) { previewControls.dispose(); previewControls = null; }
+    await renderer.xr.setSession(session);
+    loadLayout(currentLayout);
+  } catch (e) {
+    setMode('none');
+    msg('Could not start VR: ' + e.message);
   }
 };
 document.getElementById('previewBtn').onclick = () => startPreview();
 
 async function checkXR() {
-  const ok = navigator.xr && await navigator.xr.isSessionSupported('immersive-ar').catch(() => false);
-  if (!ok) document.getElementById('noxr').style.display = 'block';
+  const ar = navigator.xr && await navigator.xr.isSessionSupported('immersive-ar').catch(() => false);
+  const vr = navigator.xr && await navigator.xr.isSessionSupported('immersive-vr').catch(() => false);
+  document.getElementById('startBtn').disabled = !ar;
+  document.getElementById('vrBtn').disabled = !vr;
+  if (!ar && !vr) document.getElementById('noxr').style.display = 'block';
 }
 checkXR();
 
+// VR walking: left thumbstick moves you where you are looking (the reference space is shifted)
+const _fwd = new THREE.Vector3(), _right = new THREE.Vector3();
+function vrLocomotion(dt) {
+  const session = renderer.xr.getSession();
+  if (!session || xrMode !== 'vr') return;
+  let mx = 0, mz = 0;
+  for (const src of session.inputSources) {
+    if (!src.gamepad || src.handedness !== 'left') continue;
+    const a = src.gamepad.axes;
+    mx = a[2] || 0; mz = a[3] || 0;
+  }
+  if (Math.abs(mx) < 0.15) mx = 0;
+  if (Math.abs(mz) < 0.15) mz = 0;
+  if (!mx && !mz) return;
+  const xrCam = renderer.xr.getCamera();
+  xrCam.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
+  _right.set(-_fwd.z, 0, _fwd.x);
+  const speed = 1.4 * dt;
+  const dx = (_fwd.x * -mz + _right.x * mx) * speed, dz = (_fwd.z * -mz + _right.z * mx) * speed;
+  const ref = renderer.xr.getReferenceSpace();
+  renderer.xr.setReferenceSpace(ref.getOffsetReferenceSpace(new XRRigidTransform({ x: dx, y: 0, z: dz, w: 1 })));
+}
+
 function startPreview() {
+  setMode('none');
   document.getElementById('start').style.display = 'none';
   previewControls = new OrbitControls(camera, renderer.domElement);
   camera.position.set(3.5, 2.2, 4.5);
@@ -455,8 +956,10 @@ function startPreview() {
 }
 
 // ---------- Loop ----------
-let frameN = 0;
+let lastStatusT = -1e9, lastT = 0;
 function loop(t, frame) {
+  const dt = Math.min(0.05, (t - lastT) / 1000 || 0); lastT = t;
+  if (renderer.xr.isPresenting) vrLocomotion(dt);
   if (renderer.xr.isPresenting && frame && hitSource && !placed) {
     const hits = frame.getHitTestResults(hitSource);
     if (hits.length) {
@@ -469,16 +972,27 @@ function loop(t, frame) {
   if (renderer.xr.isPresenting && frame) updatePlanes(frame);
   updateGrab();
   if (previewControls) previewControls.update();
-  if ((frameN++ % 10) === 0) updateStatus();
+  if (t - lastStatusT >= 200) { lastStatusT = t; updateStatus(); }   // about 5 times a second
+  updatePanels(performance.now());
+  // Keep the sun's shadow box centred on the van wherever it was placed
+  sun.target.position.copy(world.position);
+  sun.position.set(world.position.x + 3, world.position.y + 6, world.position.z + 4);
   renderer.render(scene, camera);
 }
 renderer.setAnimationLoop(loop);
 
 // Hint text for the desktop preview keyboard shortcut
 addEventListener('keydown', e => {
-  if (e.key === '1') document.querySelector('[data-layout="Bed"]').click();
-  if (e.key === '2') document.querySelector('[data-layout="Lounge"]').click();
-  if (e.key === '3') document.querySelector('[data-layout="Packed"]').click();
+  if (e.key === '1') selectLayout('Bed');
+  if (e.key === '2') selectLayout('Lounge');
+  if (e.key === '3') selectLayout('Packed');
+  // Desktop preview cameras: I = inside through the rear doors, O = outside three-quarter view
+  if (previewControls && (e.key === 'i' || e.key === 'I')) {
+    camera.position.set(0.15, 1.35, 2.05); previewControls.target.set(0, 0.95, -0.2); previewControls.update();
+  }
+  if (previewControls && (e.key === 'o' || e.key === 'O')) {
+    camera.position.set(3.5, 2.2, 4.5); previewControls.target.set(0, 0.6, 0); previewControls.update();
+  }
 });
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
