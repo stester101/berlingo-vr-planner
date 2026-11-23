@@ -95,6 +95,7 @@ renderer.setClearColor(0x000000, 0);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 renderer.shadowMap.enabled = true;
+renderer.localClippingEnabled = true;      // for the Sims-style wall views
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
@@ -413,6 +414,7 @@ function loadLayout(name, done) {
     });
     vanRoot.add(vanModel);
     applyXray();
+    applyView();
     currentLayout = name;
     if (done) done();
   };
@@ -941,11 +943,11 @@ function updatePanels(now) {
     let sc = 1;
     if (panelFollow) {
       sc = 0.55;
-      const ang = followYaw + (1.5 - ci) * 0.38, dist = 0.95;
+      const ang = followYaw + (2 - ci) * 0.36, dist = 0.95;
       _p.set(followAnchor.x + Math.sin(ang) * dist, followAnchor.y - 0.05 - ri * 0.2, followAnchor.z + Math.cos(ang) * dist);
     } else {
       const side = -(0.75 * scaleValue + 0.85);
-      _p.set(side, 1.62 - ri * 0.4, 0.3 + (ci - 1.5) * 0.66);
+      _p.set(side, 1.62 - ri * 0.4, 0.3 + (ci - 2) * 0.66);
       world.localToWorld(_p);
     }
     const k = Math.min(1, Math.max(0, t * 2 - i * 0.15)), e = 1 - Math.pow(1 - k, 3);
@@ -1171,8 +1173,51 @@ function handleButtons() {
     const holding = grabbed.has(c);
     if (down(4)) { if (holding) duplicateHeld(c); else if (src.handedness === 'left') doUndo(); else toggleXray(); }
     if (down(5)) { if (holding) deleteHeld(c); else if (src.handedness === 'left') toggleFollow(); else goTo('rear'); }
+    if (down(3) && src.handedness === 'right') { const ks = Object.keys(VIEW_MODES); setView(ks[(ks.indexOf(viewMode) + 1) % ks.length]); }
     prevBtn.set(c, b.map(x => x.pressed));
   });
+}
+
+// Sims-style wall views: cut the van's shell (body, glass, lining) with clipping planes; the load stays visible
+const VIEW_MODES = { full: 'Walls up', roof: 'Roof off', cut: 'Cutaway', low: 'Walls down', none: 'No walls' };
+let viewMode = 'full';
+const clipPlanes = [new THREE.Plane(), new THREE.Plane()];
+const _lp = new THREE.Plane(), _cl = new THREE.Vector3();
+function shellMats() {
+  const out = new Set();
+  if (vanModel) vanModel.traverse(o => {
+    if (o.isMesh && o.material && /body|paint|silver|glass|seam|bumper|dark|trim|headliner|felt|led|bulkhead|tail|ply rear|mirror/.test((o.material.name || '').toLowerCase())) out.add(o.material);
+  });
+  return [...out];
+}
+function applyView() {
+  const cut = viewMode === 'cut';
+  shellMats().forEach(m => {
+    m.clippingPlanes = viewMode === 'full' ? null : (cut ? clipPlanes : [clipPlanes[0]]);
+    m.clipIntersection = cut;          // cutaway: remove only where BOTH near-side and above-floor
+    m.clipShadows = true;
+    m.side = viewMode === 'full' ? THREE.FrontSide : THREE.DoubleSide;
+    m.needsUpdate = true;
+  });
+}
+function setView(m) { viewMode = m; applyView(); msg(VIEW_MODES[m]); }
+function updateClipping() {
+  if (viewMode === 'full' || !placed) return;
+  vanRoot.updateMatrixWorld(true);
+  const M = vanRoot.matrixWorld;
+  // Planes are defined in the van's own frame (metres), then moved with the van. Kept side = positive.
+  if (viewMode === 'roof') _lp.set(new THREE.Vector3(0, -1, 0), 1.6);     // keep below the roof line
+  if (viewMode === 'low')  _lp.set(new THREE.Vector3(0, -1, 0), 1.0);     // keep below the window line
+  if (viewMode === 'none') _lp.set(new THREE.Vector3(0, -1, 0), 0.56);    // keep floor, wheels, chassis
+  if (viewMode === 'cut') {
+    // Remove the half of the shell between you and the van's centre line, above the floor
+    camera.getWorldPosition(_cl); vanRoot.worldToLocal(_cl); _cl.y = 0;
+    if (_cl.lengthSq() < 1e-4) _cl.set(1, 0, 0);
+    _cl.normalize();
+    _lp.set(_cl.clone().negate(), 0.12);                                   // negative (clipped) on your side
+    clipPlanes[1].copy(new THREE.Plane(new THREE.Vector3(0, -1, 0), 0.58)).applyMatrix4(M);   // and above 0.58 m
+  }
+  clipPlanes[0].copy(_lp).applyMatrix4(M);
 }
 
 // ----- New panels -----
@@ -1201,6 +1246,13 @@ const addPanel = makePanel({
   buttons: ITEM_DEFS.map((d, i) => ({ id: 'add' + i, label: d.name, accent: ACC.add, action: () => addFromCatalogue(d),
     x: 40 + (i % 3) * 320, y: 118 + Math.floor(i / 3) * 128, w: 300, h: 112, fs: 34 }))
 });
+const viewPanel = makePanel({
+  title: 'View', w: 0.6,
+  sig: () => viewMode,
+  extra: (ctx) => { ctx.textAlign = 'right'; ctx.font = '400 30px ' + FONT; ctx.fillStyle = '#94a3b8'; ctx.fillText('like The Sims', 976, 72); },
+  buttons: Object.entries(VIEW_MODES).map(([k, label], i) => ({ id: k, label, accent: [244, 114, 182], action: () => setView(k),
+    active: () => viewMode === k, x: 40 + (i % 3) * 320, y: 125 + Math.floor(i / 3) * 185, w: 300, h: 165, fs: 38 }))
+});
 const helpPanel = makePanel({
   title: 'Controls', w: 0.6,
   extra: (ctx) => {
@@ -1212,10 +1264,11 @@ const helpPanel = makePanel({
       ['Spin held item', 'right stick'],
       ['Copy / remove held', 'A·X / B·Y'],
       ['Undo / follow me', 'left X / left Y'],
-      ['X-ray / rear doors', 'right A / right B']
+      ['X-ray / rear doors', 'right A / right B'],
+      ['Next wall view', 'click right stick']
     ];
     rows.forEach((r, i) => {
-      const y = 128 + i * 47;
+      const y = 124 + i * 43;
       ctx.textAlign = 'left'; ctx.font = '500 30px ' + FONT; ctx.fillStyle = '#94a3b8'; ctx.fillText(r[0], 48, y);
       ctx.textAlign = 'right'; ctx.font = '600 30px ' + FONT; ctx.fillStyle = '#f1f5f9'; ctx.fillText(r[1], 976, y);
     });
@@ -1223,7 +1276,7 @@ const helpPanel = makePanel({
 });
 // Grid slots: [column, row]
 layoutPanel.slot = [0, 0]; sizePanel.slot = [1, 0]; toolsPanel.slot = [2, 0]; viewsPanel.slot = [3, 0];
-statusPanel.slot = [0, 1]; actionsPanel.slot = [1, 1]; addPanel.slot = [2, 1]; helpPanel.slot = [3, 1];
+statusPanel.slot = [0, 1]; actionsPanel.slot = [1, 1]; addPanel.slot = [2, 1]; helpPanel.slot = [3, 1]; viewPanel.slot = [4, 0];
 
 // ---------- Start AR, or desktop preview ----------
 let previewControls = null;
@@ -1371,6 +1424,7 @@ function loop(t, frame) {
   handleButtons();
   updateGrab();
   updateTools();
+  updateClipping();
   if (previewControls) previewControls.update();
   if (t - lastStatusT >= 200) { lastStatusT = t; updateStatus(); }   // about 5 times a second
   updatePanels(performance.now());
@@ -1399,6 +1453,7 @@ addEventListener('keydown', e => {
     if (k === 'w') d.copy(f); if (k === 's') d.copy(f).negate(); if (k === 'a') d.copy(r).negate(); if (k === 'd') d.copy(r);
     d.multiplyScalar(0.3); camera.position.add(d); previewControls.target.add(d); previewControls.update();
   }
+  if (e.key === 'v' || e.key === 'V') { const ks = Object.keys(VIEW_MODES); setView(ks[(ks.indexOf(viewMode) + 1) % ks.length]); }
   if (previewControls && (e.key === 'o' || e.key === 'O')) {
     camera.position.set(3.5, 2.2, 4.5); previewControls.target.set(0, 0.6, 0); previewControls.update();
   }
