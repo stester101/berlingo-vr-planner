@@ -193,9 +193,71 @@ function surfaceTop(x, z) {
   return top;
 }
 function inCargo(x, z) { return Math.abs(x) <= CARGO.x && z >= CARGO.z0 && z <= CARGO.z1; }
+// ---------- Real room surfaces (WebXR plane detection, if the headset reports them) ----------
+const realPlanes = new Map();   // XRPlane -> { poly: [Vector3 world], y, mesh, stamp }
+let planeCount = 0;
+const planeMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false });
+
+function updatePlanes(frame) {
+  const detected = (frame.worldInformation && frame.worldInformation.detectedPlanes) || frame.detectedPlanes;
+  if (!detected) return;
+  const refSpace = renderer.xr.getReferenceSpace();
+  const seen = new Set();
+  detected.forEach(plane => {
+    seen.add(plane);
+    const prev = realPlanes.get(plane);
+    if (prev && prev.stamp === plane.lastChangedTime) return;
+    const pose = frame.getPose(plane.planeSpace, refSpace);
+    if (!pose) return;
+    if (prev) { scene.remove(prev.mesh); prev.mesh.geometry.dispose(); }
+    const m = new THREE.Matrix4().fromArray(pose.transform.matrix);
+    const poly = plane.polygon.map(p => new THREE.Vector3(p.x, 0, p.z).applyMatrix4(m));
+    // Shape uses (x, -z) so that rotateX(-90deg) lands the outline back on (x, 0, z)
+    const shape = new THREE.Shape(plane.polygon.map(p => new THREE.Vector2(p.x, -p.z)));
+    const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2), planeMat);
+    mesh.matrixAutoUpdate = false;
+    mesh.matrix.copy(m);
+    scene.add(mesh);
+    realPlanes.set(plane, { poly, y: m.elements[13], mesh, stamp: plane.lastChangedTime });
+  });
+  realPlanes.forEach((v, k) => {
+    if (!seen.has(k)) { scene.remove(v.mesh); v.mesh.geometry.dispose(); realPlanes.delete(k); }
+  });
+  planeCount = realPlanes.size;
+}
+
+function pointInPoly(x, z, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, zi = poly[i].z, xj = poly[j].x, zj = poly[j].z;
+    if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+// Highest real surface under (x, z) that is not above the point by more than maxAbove
+function realTopAt(x, y, z, maxAbove) {
+  let best = null;
+  realPlanes.forEach(v => {
+    if (v.y > y + maxAbove) return;
+    if (best !== null && v.y <= best) return;
+    if (pointInPoly(x, z, v.poly)) best = v.y;
+  });
+  return best;
+}
+
+// Put an item on whatever is below it: real furniture or floor, or the van's own surfaces
 function seatItem(it) {
-  const p = it.position;
-  p.y = surfaceTop(p.x, p.z) + it.userData.h / 2 + 0.005;
+  const s = vanRoot.scale.x;
+  const wp = vanRoot.localToWorld(it.position.clone());
+  let top = realTopAt(wp.x, wp.y, wp.z, 0.15);
+  if (top === null) top = world.position.y;               // no real surface found: the floor you placed the van on
+  const lx = it.position.x, lz = it.position.z;
+  if (inCargo(lx, lz)) {
+    const vt = vanRoot.localToWorld(new THREE.Vector3(lx, surfaceTop(lx, lz), lz)).y;
+    if (vt > top) top = vt;                                // van's own bed, table or stack
+  }
+  const newY = top + it.userData.h / 2 * s + 0.005 * s;
+  it.position.copy(vanRoot.worldToLocal(new THREE.Vector3(wp.x, newY, wp.z)));
 }
 
 // ---------- Hit test and placement ----------
@@ -333,7 +395,8 @@ function updateStatus() {
     `Loaded ${looseKg.toFixed(1)} kg, ${count} items in van, ${off} outside\n` +
     `Total ${total.toFixed(0)} / ${PAYLOAD_KG} kg${total > PAYLOAD_KG ? '  OVER' : ''}\n` +
     `CoG L/R ${cogX.toFixed(2)} m, F/B ${cogZ.toFixed(2)} m, rear axle ${rear.toFixed(0)}%\n` +
-    `${headroomLine}`;
+    `${headroomLine}\n` +
+    `Room surfaces: ${planeCount ? planeCount + ' found' : 'none yet, look around the room'}`;
 }
 
 // ---------- Buttons ----------
@@ -362,7 +425,7 @@ document.getElementById('startBtn').onclick = async () => {
   try {
     const session = await navigator.xr.requestSession('immersive-ar', {
       requiredFeatures: ['hit-test'],
-      optionalFeatures: ['local-floor', 'dom-overlay', 'hand-tracking'],
+      optionalFeatures: ['local-floor', 'dom-overlay', 'hand-tracking', 'plane-detection'],
       domOverlay: { root: overlay }
     });
     document.getElementById('start').style.display = 'none';
@@ -403,6 +466,7 @@ function loop(t, frame) {
       lastHitValid = true;
     } else { reticle.visible = false; lastHitValid = false; }
   }
+  if (renderer.xr.isPresenting && frame) updatePlanes(frame);
   updateGrab();
   if (previewControls) previewControls.update();
   if ((frameN++ % 10) === 0) updateStatus();
