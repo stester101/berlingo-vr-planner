@@ -52,6 +52,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
 // ---------- CONFIG (metres / kg). Placeholders until you measure ----------
 const PAYLOAD_KG = 600;
@@ -77,15 +79,29 @@ const LAYOUTS = {
 };
 
 const ITEM_DEFS = [
-  { name: 'Water 20L',    kg: 20,  size: [0.30, 0.40, 0.20], color: 0x3b82f6 },
-  { name: 'Stove',        kg: 4,   size: [0.40, 0.12, 0.35], color: 0xf97316 },
-  { name: 'Gas bottle',   kg: 11,  size: [0.30, 0.40, 0.30], color: 0xef4444 },
-  { name: 'Tools bag',    kg: 8,   size: [0.40, 0.25, 0.25], color: 0x22c55e },
-  { name: 'Cool box',     kg: 6,   size: [0.50, 0.35, 0.35], color: 0x06b6d4 },
-  { name: 'Crate',        kg: 5,   size: [0.40, 0.30, 0.25], color: 0x64748b },
-  { name: 'Spare pillow', kg: 0.5, size: [0.45, 0.12, 0.30], color: 0xf8fafc },
-  { name: 'Football',     kg: 0.4, size: [0.28, 0.16, 0.16], color: 0x7c2d12, shape: 'ball' },
-  { name: 'Golf bag',     kg: 9,   size: [0.30, 0.95, 0.30], color: 0x1e3a8a, shape: 'golf' }
+  { name: 'Water 20L',      cat: 'Kitchen', kg: 20,  size: [0.30, 0.40, 0.20], color: 0x3b82f6, start: 1 },
+  { name: 'Water 10L',      cat: 'Kitchen', kg: 10,  size: [0.24, 0.32, 0.16], color: 0x3b82f6 },
+  { name: 'Stove',          cat: 'Kitchen', kg: 4,   size: [0.40, 0.12, 0.35], color: 0xf97316, start: 1 },
+  { name: 'Gas bottle',     cat: 'Kitchen', kg: 11,  size: [0.30, 0.40, 0.30], color: 0xef4444, start: 1 },
+  { name: 'Kettle',         cat: 'Kitchen', kg: 0.8, size: [0.22, 0.24, 0.18], color: 0xd1d5db },
+  { name: 'Pan set',        cat: 'Kitchen', kg: 2.5, size: [0.30, 0.16, 0.45], color: 0x374151 },
+  { name: 'Cool box',       cat: 'Kitchen', kg: 6,   size: [0.50, 0.35, 0.35], color: 0x06b6d4, start: 1 },
+  { name: 'Spare pillow',   cat: 'Sleep',   kg: 0.5, size: [0.45, 0.12, 0.30], color: 0xf8fafc, start: 1 },
+  { name: 'Sleeping bag',   cat: 'Sleep',   kg: 1.6, size: [0.45, 0.28, 0.28], color: 0x15803d },
+  { name: 'Duvet bag',      cat: 'Sleep',   kg: 2.5, size: [0.60, 0.30, 0.40], color: 0x94a3b8 },
+  { name: 'Crate',          cat: 'Storage', kg: 5,   size: [0.40, 0.30, 0.25], color: 0x64748b, start: 1 },
+  { name: 'Tools bag',      cat: 'Storage', kg: 8,   size: [0.40, 0.25, 0.25], color: 0x22c55e, start: 1 },
+  { name: 'Rucksack',       cat: 'Storage', kg: 7,   size: [0.32, 0.55, 0.22], color: 0xea580c },
+  { name: 'Duffel bag',     cat: 'Storage', kg: 6,   size: [0.60, 0.30, 0.30], color: 0x1f2937 },
+  { name: 'Shoe box',       cat: 'Storage', kg: 1.5, size: [0.35, 0.13, 0.22], color: 0xb45309 },
+  { name: 'Golf bag',       cat: 'Outdoor', kg: 9,   size: [0.30, 0.95, 0.30], color: 0x1e3a8a, start: 1 },
+  { name: 'Football',       cat: 'Outdoor', kg: 0.4, size: [0.28, 0.16, 0.16], color: 0x7c2d12, start: 1 },
+  { name: 'Camping chair',  cat: 'Outdoor', kg: 3,   size: [0.15, 0.85, 0.15], color: 0x166534 },
+  { name: 'Folding table',  cat: 'Outdoor', kg: 4,   size: [0.60, 0.07, 0.40], color: 0xa8a29e },
+  { name: 'Bike',           cat: 'Outdoor', kg: 13,  size: [0.55, 1.00, 1.70], color: 0x0ea5e9 },
+  { name: 'Paddleboard bag',cat: 'Outdoor', kg: 11,  size: [0.40, 0.80, 0.30], color: 0x0891b2 },
+  { name: 'Leisure battery',cat: 'Power',   kg: 25,  size: [0.35, 0.24, 0.18], color: 0x111827 },
+  { name: 'Power station',  cat: 'Power',   kg: 6,   size: [0.30, 0.20, 0.20], color: 0x6b7280 }
 ];
 
 // ---------- Scene ----------
@@ -293,6 +309,108 @@ const BUILDERS = {
   }
 };
 
+// ---------- More library items ----------
+Object.assign(BUILDERS, {
+  'Water 10L': () => { const g = BUILDERS['Water 20L'](); g.scale.setScalar(0.8); return g; },
+  'Kettle': () => {
+    const g = new THREE.Group(), steel = mat(0xd1d5db, 0.25, 0.9);
+    const pts = [[0, -0.12], [0.085, -0.12], [0.09, -0.06], [0.08, 0.06], [0.05, 0.1], [0, 0.1]].map(q => new THREE.Vector2(q[0], q[1]));
+    g.add(new THREE.Mesh(new THREE.LatheGeometry(pts, 32), steel));
+    const handle = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.008, 8, 24, Math.PI), mat(0x111827, 0.6));
+    g.add(at(handle, 0, 0.09, 0));
+    const spout = cylm(0.012, 0.02, 0.09, steel, 12); spout.rotation.z = -0.9; g.add(at(spout, 0.1, 0.02, 0));
+    return g;
+  },
+  'Pan set': () => {
+    const g = new THREE.Group(), dark = mat(0x374151, 0.4, 0.6);
+    [[0.14, -0.05], [0.12, 0.0], [0.10, 0.05]].forEach(([r, y]) => {
+      g.add(at(cylm(r, r * 0.95, 0.05, dark, 32), 0, y, -0.06));
+      g.add(at(rbox(0.03, 0.015, 0.16, 0.005, mat(0x111827, 0.6)), 0, y + 0.01, 0.14));
+    });
+    return g;
+  },
+  'Sleeping bag': () => {
+    const g = new THREE.Group();
+    const roll = cylm(0.14, 0.14, 0.45, mat(0x15803d, 0.7), 32); roll.rotation.z = Math.PI / 2; g.add(roll);
+    [-0.12, 0.12].forEach(x => { const s = new THREE.Mesh(new THREE.TorusGeometry(0.142, 0.008, 6, 32), mat(0x111827, 0.6)); s.rotation.y = Math.PI / 2; g.add(at(s, x, 0, 0)); });
+    return g;
+  },
+  'Duvet bag': () => rbox(0.60, 0.30, 0.40, 0.12, mat(0x94a3b8, 0.95)),
+  'Rucksack': () => {
+    const g = new THREE.Group();
+    g.add(rbox(0.32, 0.55, 0.22, 0.07, mat(0xea580c, 0.85)));
+    g.add(at(rbox(0.24, 0.2, 0.06, 0.04, mat(0xc2410c, 0.85)), 0, -0.1, 0.12));
+    g.add(at(rbox(0.30, 0.1, 0.22, 0.05, mat(0x1f2937, 0.8)), 0, 0.26, 0));
+    [-0.09, 0.09].forEach(x => g.add(at(rbox(0.04, 0.45, 0.02, 0.01, mat(0x111827, 0.7)), x, 0, -0.12)));
+    return g;
+  },
+  'Duffel bag': () => {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.3, 8, 24), mat(0x1f2937, 0.8)); body.rotation.z = Math.PI / 2; g.add(body);
+    const hd = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.012, 8, 24, Math.PI), mat(0xf59e0b, 0.6)); g.add(at(hd, 0, 0.14, 0));
+    return g;
+  },
+  'Shoe box': () => {
+    const g = new THREE.Group();
+    g.add(at(rbox(0.35, 0.11, 0.22, 0.005, mat(0xb45309, 0.8)), 0, -0.01, 0));
+    g.add(at(rbox(0.36, 0.03, 0.23, 0.005, mat(0x92400e, 0.8)), 0, 0.05, 0));
+    return g;
+  },
+  'Camping chair': () => {
+    const g = new THREE.Group();
+    g.add(cylm(0.07, 0.07, 0.85, mat(0x166534, 0.85), 24));
+    [0.3, -0.3].forEach(y => g.add(at(cylm(0.072, 0.072, 0.03, mat(0x111827, 0.6), 24), 0, y, 0)));
+    return g;
+  },
+  'Folding table': () => {
+    const g = new THREE.Group();
+    g.add(rbox(0.60, 0.035, 0.40, 0.01, mat(0xa8a29e, 0.35, 0.8)));
+    [-0.15, 0.15].forEach(z => { const leg = at(cylm(0.008, 0.008, 0.55, mat(0x57534e, 0.4, 0.9), 8), 0, -0.025, z); leg.rotation.z = Math.PI / 2; g.add(leg); });
+    return g;
+  },
+  'Bike': () => {
+    const g = new THREE.Group(), frameM = mat(0x0ea5e9, 0.35, 0.4), tyre = mat(0x111827, 0.8), steel = mat(0x9ca3af, 0.3, 0.9);
+    [-0.52, 0.52].forEach(z => {
+      const w = new THREE.Mesh(new THREE.TorusGeometry(0.33, 0.022, 10, 40), tyre); w.rotation.y = Math.PI / 2; g.add(at(w, 0, -0.17, z));
+      const hub = cylm(0.025, 0.025, 0.1, steel, 12); hub.rotation.z = Math.PI / 2; g.add(at(hub, 0, -0.17, z));
+    });
+    const tube = (a, b, r = 0.018) => {
+      const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), m = cylm(r, r, A.distanceTo(B), frameM, 10);
+      m.position.copy(A).add(B).multiplyScalar(0.5);
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize());
+      g.add(m);
+    };
+    tube([0, -0.17, 0.52], [0, -0.12, 0.05]); tube([0, -0.12, 0.05], [0, 0.22, -0.02]); tube([0, 0.22, -0.02], [0, 0.22, -0.42]);
+    tube([0, -0.12, 0.05], [0, 0.22, -0.42]); tube([0, 0.22, -0.42], [0, -0.17, -0.52]); tube([0, -0.17, 0.52], [0, 0.22, 0.0]);
+    tube([0, 0.22, -0.42], [0, 0.36, -0.46], 0.014);
+    const bar = cylm(0.012, 0.012, 0.5, steel, 8); bar.rotation.z = Math.PI / 2; g.add(at(bar, 0, 0.37, -0.46));
+    g.add(at(rbox(0.1, 0.04, 0.24, 0.02, mat(0x111827, 0.7)), 0, 0.3, 0.02));
+    return g;
+  },
+  'Paddleboard bag': () => {
+    const g = new THREE.Group();
+    g.add(rbox(0.40, 0.80, 0.30, 0.1, mat(0x0891b2, 0.8)));
+    [-0.1, 0.1].forEach(x => g.add(at(rbox(0.05, 0.6, 0.02, 0.01, mat(0x111827, 0.7)), x, 0, -0.16)));
+    return g;
+  },
+  'Leisure battery': () => {
+    const g = new THREE.Group();
+    g.add(rbox(0.35, 0.21, 0.18, 0.01, mat(0x111827, 0.5)));
+    g.add(at(rbox(0.36, 0.03, 0.19, 0.01, mat(0x1f2937, 0.5)), 0, 0.11, 0));
+    g.add(at(cylm(0.015, 0.015, 0.03, mat(0xdc2626, 0.4)), -0.12, 0.13, 0));
+    g.add(at(cylm(0.015, 0.015, 0.03, mat(0x111827, 0.4)), 0.12, 0.13, 0));
+    return g;
+  },
+  'Power station': () => {
+    const g = new THREE.Group();
+    g.add(rbox(0.30, 0.17, 0.20, 0.02, mat(0x6b7280, 0.45, 0.3)));
+    g.add(at(rbox(0.22, 0.08, 0.01, 0.01, mat(0x0f172a, 0.3)), 0, 0.0, 0.1));
+    g.add(at(rbox(0.06, 0.02, 0.01, 0.005, mat(0x22d3ee, 0.3, 0, { emissive: 0x22d3ee, emissiveIntensity: 0.8 })), -0.06, 0.01, 0.106));
+    const hd = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.012, 8, 24, Math.PI), mat(0x111827, 0.6)); g.add(at(hd, 0, 0.085, 0));
+    return g;
+  }
+});
+
 function makeItem(def) {
   const g = BUILDERS[def.name] ? BUILDERS[def.name]() : rbox(...def.size, 0.02, mat(def.color));
   g.userData = { name: def.name, kg: def.kg, h: def.size[1] };
@@ -340,7 +458,7 @@ function removeItem(it) {
   vanRoot.remove(it);
   const i = items.indexOf(it); if (i >= 0) items.splice(i, 1);
 }
-ITEM_DEFS.forEach((def, i) => spawnItem(def, 1.6 + (i % 3) * 0.45, -0.6 + Math.floor(i / 3) * 0.55));
+ITEM_DEFS.filter(d => d.start).forEach((def, i) => spawnItem(def, 1.6 + (i % 3) * 0.45, -0.6 + Math.floor(i / 3) * 0.55));
 
 // Reticle (placement ring on real surfaces)
 const reticle = new THREE.Mesh(
@@ -539,7 +657,8 @@ function placeVan(pos) {
   reticle.visible = false;
   setHud(true); setStatus(true);
   applyScale();
-  msg('Van placed. Use the floating panels to resize, switch layout or move items.');
+  msg('Van placed');
+  setTimeout(maybeStartTour, 600);
 }
 
 // ---------- Controllers: place, grab and drop ----------
@@ -563,7 +682,7 @@ function pulse(c, strength = 0.4, ms = 40) {
   if (h && h[0] && h[0].pulse) h[0].pulse(strength, ms);
 }
 const _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, 'YXZ');
-function ctrlYaw(c) { c.getWorldQuaternion(_q); _e.setFromQuaternion(_q, 'YXZ'); return _e.y; }
+function ctrlYaw(c) { const g = c.userData.grip; (g && g.visible ? g : c).getWorldQuaternion(_q); _e.setFromQuaternion(_q, 'YXZ'); return _e.y; }
 function vanYaw() { vanRoot.getWorldQuaternion(_q); _e.setFromQuaternion(_q, 'YXZ'); return _e.y; }
 function itemRoot(o) { while (o && !items.includes(o)) o = o.parent; return o; }
 
@@ -602,9 +721,11 @@ function onSelectStart(c) {
     return;
   }
   // A controller pointing at a floating panel presses its button
+  lastPointer = c;
   panelGroup.updateMatrixWorld(true);
   const ph = hitPanels(rayFromController(c));
   if (ph) { if (ph.b) { pressButton(ph.P, ph.b); pulse(c, 0.3, 25); } return; }
+  if (placing) { confirmPlacing(); pulse(c, 0.5, 40); return; }
   // Measure / capture tools take the click while active
   if (tool !== 'none') { toolClick(c); return; }
   if (tryGrab(c)) return;
@@ -786,6 +907,14 @@ function drawButton(ctx, P, b, now) {
   ctx.lineWidth = hover || active ? 5 : 3;
   ctx.strokeStyle = rgba(a, hover || active || pressed ? 1 : 0.5);
   ctx.stroke();
+  if (b.img) {                     // library tile: thumbnail + name + weight
+    const size = Math.min(w - 24, h - 62);
+    ctx.drawImage(b.img, x + (w - size) / 2, y + 8, size, size);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '600 26px ' + FONT; ctx.fillStyle = '#f1f5f9'; ctx.fillText(b.label, x + w / 2, y + h - 40);
+    ctx.font = '400 22px ' + FONT; ctx.fillStyle = rgba(a, 1); ctx.fillText(b.sub || '', x + w / 2, y + h - 16);
+    return;
+  }
   const fg = active ? '#0b1220' : '#f1f5f9';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   const cx = x + w / 2, cy = y + h / 2;
@@ -885,7 +1014,7 @@ function rayFromMouse() { rc.setFromCamera(new THREE.Vector2(mouse.x, mouse.y), 
 function hitPanels(ray) {
   for (const h of ray.intersectObjects(panelMeshes, false)) {
     const P = h.object.userData.panel;
-    if (P.mat.opacity < 0.5 || !h.uv) continue;
+    if (P.hidden || !P.mesh.visible || P.mat.opacity < 0.5 || !h.uv) continue;
     const px = h.uv.x * P.cw, py = (1 - h.uv.y) * P.ch;
     const b = P.buttons.find(b => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) || null;
     return { P, b, dist: h.distance };
@@ -919,58 +1048,40 @@ renderEl.addEventListener('click', e => {
   mouse.x = (e.clientX / innerWidth) * 2 - 1; mouse.y = -(e.clientY / innerHeight) * 2 + 1;
   panelGroup.updateMatrixWorld(true);
   const h = hitPanels(rayFromMouse());
+  lastPointer = null;
   if (h && h.b) pressButton(h.P, h.b);
+  else if (!h && placing) confirmPlacing();
 });
 
 const _cam = new THREE.Vector3(), _p = new THREE.Vector3();
 function updatePanels(now) {
-  panelGroup.visible = placed;
-  if (!placed) { rayLines.forEach(l => { l.visible = false; }); return; }
-  world.updateMatrixWorld(true);
-  camera.getWorldPosition(_cam);
+  panelGroup.visible = placed || tourActive;
+  if (!panelGroup.visible) { rayLines.forEach(l => { l.visible = false; }); return; }
+  updateAnchor();
   const t = (now - panelsShownAt) / 1000;
-  // Panels sit in a 4 x 2 grid: beside the van, or (menu button / "Follow me") in an arc in front of you
-  if (panelFollow) {
-    const xrc = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
-    xrc.getWorldPosition(_cam);
-    xrc.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
-    const baseYaw = Math.atan2(_fwd.x, _fwd.z);
-    if (followYaw === null || Math.abs(Math.atan2(Math.sin(baseYaw - followYaw), Math.cos(baseYaw - followYaw))) > 0.9) followYaw = baseYaw;
-    followAnchor.lerp(_cam, 0.08);
-  }
-  panels.forEach((P, i) => {
-    const [ci, ri] = P.slot || [0, 0];
-    let sc = 1;
-    if (panelFollow) {
-      sc = 0.55;
-      const ang = followYaw + (2 - ci) * 0.36, dist = 0.95;
-      _p.set(followAnchor.x + Math.sin(ang) * dist, followAnchor.y - 0.05 - ri * 0.2, followAnchor.z + Math.cos(ang) * dist);
-    } else {
-      const side = -(0.75 * scaleValue + 0.85);
-      _p.set(side, 1.62 - ri * 0.4, 0.3 + (ci - 2) * 0.66);
-      world.localToWorld(_p);
-    }
-    const k = Math.min(1, Math.max(0, t * 2 - i * 0.15)), e = 1 - Math.pow(1 - k, 3);
-    const bob = panelFollow ? 0 : Math.sin(now / 1000 * 1.4 + i * 1.3) * 0.012;
-    P.mesh.position.set(_p.x, _p.y + bob - (1 - e) * 0.08, _p.z);
-    const look = panelFollow ? followAnchor : _cam;
-    P.mesh.rotation.set(0, Math.atan2(look.x - _p.x, look.z - _p.z), 0);   // face you, turning around Y only
-    P.mesh.scale.setScalar(sc * (0.9 + 0.1 * e));
+  panels.forEach(P => {
+    const show = !P.hidden && (!P.show || P.show());
+    P.mesh.visible = show;
+    if (!show) { P.mat.opacity = 0; return; }
+    if (P.dynButtons) P.buttons = P.dynButtons();
+    P.place(P);
+    const k = Math.min(1, Math.max(0, t * 3)), e = 1 - Math.pow(1 - k, 3);
     P.mat.opacity = e;
   });
   panelGroup.updateMatrixWorld(true);
 
-  // Hover from every pointing source
+  // Hover from every pointing source: controller/hand rays, finger pokes, or the mouse
   const hov = new Map();
   rayLines.forEach(l => { l.visible = false; });
   if (renderer.xr.isPresenting) {
     ctrls.forEach((c, i) => {
       if (!c.visible) return;
       const h = hitPanels(rayFromController(c));
-      rayLines[i].visible = true;
+      rayLines[i].visible = !fingerNearPanel[i];
       rayLines[i].scale.z = h ? h.dist : 0.8;
       if (h && h.b) hov.set(h.P, h.b.id);
     });
+    pokeUpdate(hov);
   } else if (mouse.inside) {
     const h = hitPanels(rayFromMouse());
     if (h && h.b) hov.set(h.P, h.b.id);
@@ -978,6 +1089,7 @@ function updatePanels(now) {
   }
   // Redraw only panels whose content, hover or pressed state changed
   panels.forEach(P => {
+    if (!P.mesh.visible) return;
     P.hover = hov.get(P) || null;
     const pr = Object.keys(P.pressed).filter(k => P.pressed[k] > now).join(',');
     const key = P.sig() + '#' + P.hover + '#' + pr;
@@ -1171,8 +1283,9 @@ function handleButtons() {
     const b = src.gamepad.buttons, was = prevBtn.get(c) || [];
     const down = i => b[i] && b[i].pressed && !was[i];
     const holding = grabbed.has(c);
+    if (placing) { if (down(4)) heldCopy(); if (down(5)) heldBin(); prevBtn.set(c, b.map(x => x.pressed)); return; }
     if (down(4)) { if (holding) duplicateHeld(c); else if (src.handedness === 'left') doUndo(); else toggleXray(); }
-    if (down(5)) { if (holding) deleteHeld(c); else if (src.handedness === 'left') toggleFollow(); else goTo('rear'); }
+    if (down(5)) { if (holding) deleteHeld(c); else if (src.handedness === 'left') toggleDock(); else goTo('rear'); }
     if (down(3) && src.handedness === 'right') { const ks = Object.keys(VIEW_MODES); setView(ks[(ks.indexOf(viewMode) + 1) % ks.length]); }
     prevBtn.set(c, b.map(x => x.pressed));
   });
@@ -1278,6 +1391,344 @@ const helpPanel = makePanel({
 layoutPanel.slot = [0, 0]; sizePanel.slot = [1, 0]; toolsPanel.slot = [2, 0]; viewsPanel.slot = [3, 0];
 statusPanel.slot = [0, 1]; actionsPanel.slot = [1, 1]; addPanel.slot = [2, 1]; helpPanel.slot = [3, 1]; viewPanel.slot = [4, 0];
 
+// =====================================================================================
+// ---------- Sims-style dock: one compact menu that travels with you ----------
+// =====================================================================================
+// The old grid of panels is replaced by: a dock at chest height (tabs + content), a small "Menu" pill when
+// it is closed, and a tour card. All three follow you lazily and face you.
+[layoutPanel, sizePanel, actionsPanel, statusPanel, toolsPanel, viewsPanel, addPanel, helpPanel, viewPanel]
+  .forEach(P => { P.hidden = true; P.mesh.visible = false; });
+
+let dockOpen = true, dockTab = 'layout', libCat = 'All', libPage = 0;
+let lastPointer = null;                 // the controller/hand that last pressed something (null = mouse)
+const anchor = { pos: new THREE.Vector3(), yaw: null, target: null, pinned: false, init: false };
+const _hd = new THREE.Vector3(), _fd = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+const wrapA = a => Math.atan2(Math.sin(a), Math.cos(a));
+function viewer() { return renderer.xr.isPresenting ? renderer.xr.getCamera() : camera; }
+function updateAnchor() {
+  const v = viewer();
+  v.getWorldPosition(_hd);
+  v.getWorldDirection(_fd); _fd.y = 0;
+  if (_fd.lengthSq() < 1e-6) _fd.set(0, 0, -1);
+  _fd.normalize();
+  const yaw = Math.atan2(_fd.x, _fd.z);
+  if (anchor.pinned) return;
+  if (!anchor.init) { anchor.pos.copy(_hd); anchor.yaw = anchor.target = yaw; anchor.init = true; }
+  // Lazy follow: only re-centre when you turn well away, then glide there
+  if (Math.abs(wrapA(yaw - anchor.target)) > 0.6) anchor.target = yaw;
+  anchor.yaw += wrapA(anchor.target - anchor.yaw) * 0.08;
+  anchor.pos.lerp(_hd, 0.12);
+}
+function recentreDock() { anchor.init = false; anchor.pinned = false; msg('Menu re-centred'); }
+function placeAt(P, dist, dy, yawOff = 0) {
+  const xr = renderer.xr.isPresenting;
+  const d = xr ? dist : dist * 1.25, y = xr ? dy : dy * 0.7;
+  const a = anchor.yaw + yawOff;
+  P.mesh.position.set(anchor.pos.x + Math.sin(a) * d, anchor.pos.y + y, anchor.pos.z + Math.cos(a) * d);
+  P.mesh.lookAt(_hd);
+}
+function toggleDock() { dockOpen = !dockOpen; if (dockOpen) anchor.init = false; }
+
+// ---- Held / placing helpers (shared by controllers, hands and the dock's held bar)
+let placing = null;                     // item bought from the library, following your pointer until you drop it
+function heldInfo() {
+  if (placing) return { it: placing.it, placing: true };
+  for (const [c, g] of grabbed) return { it: g.it, c, g };
+  return null;
+}
+function heldRotate(d) {
+  const hi = heldInfo(); if (!hi) return;
+  if (hi.placing) hi.it.rotation.y += d; else hi.g.yawOff += d;
+}
+function heldCopy() {
+  const hi = heldInfo(); if (!hi) return;
+  if (!hi.placing) { duplicateHeld(hi.c); return; }
+  const ud = hi.it.userData;
+  const copy = ud.captured ? makeCapturedItem(ud.dims, ud.kg, ud.name) : makeItem(ITEM_DEFS.find(d => d.name === ud.name));
+  addToVan(copy, hi.it.position.x + 0.12, hi.it.position.z + 0.12, hi.it.rotation.y); seatItem(copy);
+  pushUndo({ type: 'add', it: copy }); msg('Copied ' + ud.name);
+}
+function heldBin() {
+  const hi = heldInfo(); if (!hi) return;
+  if (hi.placing) { removeItem(hi.it); placing = null; msg('Cancelled'); return; }
+  deleteHeld(hi.c);
+}
+function buyItem(def) {
+  if (placing) { removeItem(placing.it); placing = null; }
+  const it = makeItem(def);
+  addToVan(it, 0, 0, 0);
+  placing = { it, c: lastPointer };
+  msg(`${def.name}: point where it goes, then trigger or pinch to drop`);
+}
+function confirmPlacing() {
+  if (!placing) return;
+  seatItem(placing.it);
+  pushUndo({ type: 'add', it: placing.it });
+  msg('Placed ' + placing.it.userData.name);
+  placing = null;
+}
+function updatePlacing() {
+  if (!placing) return;
+  let ray;
+  if (renderer.xr.isPresenting) {
+    const c = placing.c && placing.c.visible ? placing.c : ctrls.find(x => x.visible);
+    if (!c) return;
+    ray = rayFromController(c);
+  } else ray = rayFromMouse();
+  placing.it.visible = false;
+  const hits = vanModel ? ray.intersectObject(vanModel, true) : [];
+  placing.it.visible = true;
+  let p = hits.length ? hits[0].point.clone() : null;
+  if (!p) {
+    _gp.constant = -world.getWorldPosition(new THREE.Vector3()).y;
+    const q = new THREE.Vector3();
+    if (ray.ray.intersectPlane(_gp, q) && q.distanceTo(ray.ray.origin) < 12) p = q;
+  }
+  if (!p) return;
+  const local = vanRoot.worldToLocal(p);
+  placing.it.position.set(local.x, 6, local.z);
+  seatItem(placing.it);
+}
+
+// ---- Item thumbnails for the library (rendered once, off screen)
+function renderThumb(def) {
+  const S = 160, rt = new THREE.WebGLRenderTarget(S, S, { samples: 4 });
+  rt.texture.colorSpace = THREE.SRGBColorSpace;
+  const sc = new THREE.Scene();
+  sc.environment = scene.environment;
+  sc.add(new THREE.HemisphereLight(0xffffff, 0x334155, 1.2));
+  const dl = new THREE.DirectionalLight(0xffffff, 2); dl.position.set(1, 2, 2); sc.add(dl);
+  const it = makeItem(def); sc.add(it);
+  const box = new THREE.Box3().setFromObject(it), size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+  const r = Math.max(size.x, size.y, size.z) * 0.62;
+  const cam = new THREE.PerspectiveCamera(32, 1, 0.01, 20);
+  cam.position.copy(c).add(new THREE.Vector3(1.1, 0.75, 1.4).normalize().multiplyScalar(r / Math.tan(16 * Math.PI / 180)));
+  cam.lookAt(c);
+  const xrWas = renderer.xr.enabled; renderer.xr.enabled = false;
+  renderer.setRenderTarget(rt); renderer.setClearColor(0x000000, 0); renderer.clear(); renderer.render(sc, cam);
+  const px = new Uint8Array(S * S * 4); renderer.readRenderTargetPixels(rt, 0, 0, S, S, px);
+  renderer.setRenderTarget(null); renderer.xr.enabled = xrWas;
+  const cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const g = cv.getContext('2d'), img = g.createImageData(S, S);
+  for (let y = 0; y < S; y++) img.data.set(px.subarray((S - 1 - y) * S * 4, (S - y) * S * 4), y * S * 4);   // flip
+  g.putImageData(img, 0, 0);
+  rt.dispose();
+  return cv;
+}
+ITEM_DEFS.forEach(d => { try { d.thumb = renderThumb(d); } catch (e) { d.thumb = null; } });
+
+// ---- Hands and controllers: real models, finger poke on the menu
+const cmf = new XRControllerModelFactory(), hmf = new XRHandModelFactory();
+const hands = [0, 1].map(i => {
+  const grip = renderer.xr.getControllerGrip(i);
+  grip.add(cmf.createControllerModel(grip));
+  scene.add(grip);
+  ctrls[i].userData.grip = grip;
+  const hand = renderer.xr.getHand(i);
+  hand.add(hmf.createHandModel(hand, 'mesh'));
+  scene.add(hand);
+  return hand;
+});
+const pokeState = [{ touch: false }, { touch: false }];
+const fingerNearPanel = [false, false];
+const _tip = new THREE.Vector3(), _loc = new THREE.Vector3();
+function usingHands() {
+  const s = renderer.xr.getSession();
+  return !!(s && [...s.inputSources].some(x => x.hand));
+}
+function pokeUpdate(hov) {
+  hands.forEach((hand, i) => {
+    fingerNearPanel[i] = false;
+    const j = hand.joints && hand.joints['index-finger-tip'];
+    if (!j || !j.visible) { pokeState[i].touch = false; return; }
+    j.getWorldPosition(_tip);
+    let touchingNow = false;
+    for (const P of panels) {
+      if (!P.mesh.visible || P.mat.opacity < 0.5) continue;
+      P.mesh.worldToLocal(_loc.copy(_tip));
+      const w = P.w, hgt = P.w * P.ch / P.cw;
+      if (Math.abs(_loc.x) > w / 2 || Math.abs(_loc.y) > hgt / 2 || _loc.z > 0.06 || _loc.z < -0.05) continue;
+      fingerNearPanel[i] = true;
+      const px = (_loc.x / w + 0.5) * P.cw, py = (0.5 - _loc.y / hgt) * P.ch;
+      const b = P.buttons.find(b => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
+      if (b) hov.set(P, b.id);
+      touchingNow = _loc.z < 0.01;
+      if (touchingNow && !pokeState[i].touch && b) { lastPointer = ctrls[i]; pressButton(P, b); pulse(ctrls[i], 0.3, 20); }
+      break;
+    }
+    pokeState[i].touch = touchingNow;
+  });
+}
+
+// ---- Dock content
+const TABS = [['layout', 'Layout'], ['view', 'View'], ['library', 'Library'], ['tools', 'Tools'], ['go', 'Go to'], ['help', 'Help']];
+const CATS = ['All', 'Kitchen', 'Sleep', 'Storage', 'Outdoor', 'Power'];
+const GREY = [148, 163, 184], SKY = [56, 189, 248];
+function libItems() { return ITEM_DEFS.filter(d => libCat === 'All' || d.cat === libCat); }
+function dockButtons() {
+  const B = [];
+  const grid = (list, cols, y0, h, gap = 16) => {
+    const w = (976 - gap * (cols - 1)) / cols;
+    list.forEach((b, i) => B.push(Object.assign({ x: 24 + (i % cols) * (w + gap), y: y0 + Math.floor(i / cols) * (h + gap), w, h, fs: 34 }, b)));
+  };
+  B.push({ id: 'min', label: '—', accent: GREY, x: 930, y: 20, w: 70, h: 64, fs: 40, action: () => { dockOpen = false; } });
+  B.push({ id: 'pin', label: anchor.pinned ? 'Unpin' : 'Pin', accent: GREY, x: 830, y: 20, w: 92, h: 64, fs: 28,
+           active: () => anchor.pinned, action: () => { anchor.pinned = !anchor.pinned; msg(anchor.pinned ? 'Menu pinned here' : 'Menu follows you'); } });
+  if (heldInfo()) {
+    [['Copy', heldCopy, [74, 222, 128]], ['Bin', heldBin, [248, 113, 113]], ['⟲ 45°', () => heldRotate(Math.PI / 4), [96, 165, 250]], ['⟳ 45°', () => heldRotate(-Math.PI / 4), [96, 165, 250]]]
+      .forEach(([l, a, c], i) => B.push({ id: 'held' + i, label: l, accent: c, x: 400 + i * 106, y: 20, w: 98, h: 64, fs: 28, action: a }));
+  }
+  TABS.forEach(([id, label], i) => B.push({ id: 'tab-' + id, label, accent: SKY, x: 24 + i * 164, y: 102, w: 156, h: 76, fs: 32,
+    active: () => dockTab === id, action: () => { dockTab = id; } }));
+  if (dockTab === 'layout') {
+    grid(['Bed', 'Lounge', 'Packed'].map(n => ({ id: 'L' + n, label: n, sub: LAYOUTS[n].kg + ' kg fittings', accent: ACC[n.toLowerCase()],
+      active: () => currentLayout === n, action: () => selectLayout(n) })), 3, 196, 140);
+    grid([{ id: 'sm', label: 'Smaller', accent: ACC.smaller, action: doSmaller },
+          { id: 'rs', label: 'Real size', accent: ACC.real, action: doRealSize, active: () => scaleValue === 1 },
+          { id: 'bg', label: 'Bigger', accent: ACC.bigger, action: doBigger }], 3, 352, 92);
+    grid([{ id: 'sv', label: 'Save', accent: ACC.save, action: saveLayout },
+          { id: 'ld', label: 'Load', accent: ACC.load, action: doLoadSaved },
+          { id: 'out', label: 'Items out', accent: ACC.outside, action: doItemsOutside },
+          { id: 'mv', label: 'Move van', accent: ACC.move, action: doReplace }], 4, 460, 92, 12);
+  } else if (dockTab === 'view') {
+    grid([...Object.entries(VIEW_MODES).map(([k, label]) => ({ id: 'v' + k, label, accent: [244, 114, 182], active: () => viewMode === k, action: () => setView(k) })),
+          { id: 'xr', label: 'X-ray', accent: ACC.xray, active: () => xray, action: toggleXray }], 3, 196, 150);
+  } else if (dockTab === 'library') {
+    CATS.forEach((c, i) => B.push({ id: 'cat' + c, label: c, accent: [74, 222, 128], x: 24 + i * 136, y: 196, w: 128, h: 62, fs: 26,
+      active: () => libCat === c, action: () => { libCat = c; libPage = 0; } }));
+    const list = libItems(), pages = Math.max(1, Math.ceil(list.length / 8));
+    if (libPage >= pages) libPage = pages - 1;
+    B.push({ id: 'prev', label: '‹', accent: GREY, x: 848, y: 196, w: 72, h: 62, fs: 40, action: () => { libPage = (libPage + pages - 1) % pages; } });
+    B.push({ id: 'next', label: '›', accent: GREY, x: 928, y: 196, w: 72, h: 62, fs: 40, action: () => { libPage = (libPage + 1) % pages; } });
+    grid(list.slice(libPage * 8, libPage * 8 + 8).map(d => ({ id: 'buy-' + d.name, label: d.name, sub: d.kg + ' kg', img: d.thumb, accent: [74, 222, 128],
+      action: () => buyItem(d) })), 4, 272, 200, 14);
+  } else if (dockTab === 'tools') {
+    grid([{ id: 'tm', label: 'Tape measure', accent: ACC.measure, active: () => tool === 'measure', action: () => setTool('measure') },
+          { id: 'cp', label: 'Capture item', sub: 'real object → copy', accent: ACC.capture, active: () => tool === 'capture', action: () => setTool('capture') },
+          { id: 'cl', label: 'Clear measures', accent: GREY, action: clearMeasurements },
+          { id: 'un', label: 'Undo', accent: GREY, action: doUndo },
+          { id: 'rc', label: 'Re-centre menu', accent: GREY, action: recentreDock },
+          { id: 'ex', label: 'Exit', sub: 'end AR / VR', accent: [248, 113, 113], action: () => { const s = renderer.xr.getSession(); if (s) s.end(); } }], 3, 196, 150);
+  } else if (dockTab === 'go') {
+    grid([...Object.entries(VIEWS).map(([k, v]) => ({ id: 'go' + k, label: v.label, accent: ACC.view, action: () => goTo(k) })),
+          { id: 'tl', label: 'Turn left', sub: '45°', accent: GREY, action: () => turnUser(Math.PI / 4) },
+          { id: 'tr', label: 'Turn right', sub: '45°', accent: GREY, action: () => turnUser(-Math.PI / 4) }], 3, 196, 150);
+  } else if (dockTab === 'help') {
+    grid([{ id: 'tour', label: 'Start the tour', sub: 'controllers and hands', accent: [250, 204, 21], action: startTour }], 1, 196, 110);
+  }
+  return B;
+}
+function wrapText(ctx, text, x, y, maxW, lh) {
+  let line = '';
+  for (const word of text.split(' ')) {
+    const test = line ? line + ' ' + word : word;
+    if (ctx.measureText(test).width > maxW && line) { ctx.fillText(line, x, y); line = word; y += lh; }
+    else line = test;
+  }
+  if (line) ctx.fillText(line, x, y);
+  return y + lh;
+}
+const dock = makePanel({
+  title: '', w: 0.46, cw: 1024, ch: 704,
+  show: () => placed && dockOpen,
+  place: P => placeAt(P, 0.5, -0.32),
+  dynButtons: dockButtons,
+  sig: () => {
+    const d = statusData, hi = heldInfo();
+    return [dockTab, libCat, libPage, currentLayout, viewMode, xray, tool, anchor.pinned, scaleValue, hi ? hi.it.userData.name : '',
+            d ? Math.round(d.total) + '|' + d.rear.toFixed(0) + '|' + d.head : '', performance.now() < toast.until ? toast.text : '', usingHands()].join('|');
+  },
+  extra: (ctx) => {
+    const d = statusData, hi = heldInfo();
+    ctx.textBaseline = 'middle';
+    if (hi) {
+      ctx.textAlign = 'left'; ctx.font = '600 30px ' + FONT; ctx.fillStyle = '#fde68a';
+      ctx.fillText(hi.placing ? 'Placing' : 'Holding', 40, 40);
+      ctx.font = '500 26px ' + FONT; ctx.fillStyle = '#e2e8f0'; ctx.fillText(hi.it.userData.name.slice(0, 18), 40, 72);
+    } else if (d) {
+      const frac = d.total / PAYLOAD_KG, col = frac > 1 ? [248, 113, 113] : frac > 0.8 ? [251, 191, 36] : [74, 222, 128];
+      ctx.textAlign = 'left'; ctx.font = '600 32px ' + FONT; ctx.fillStyle = '#f1f5f9';
+      ctx.fillText(`${currentLayout}  ·  ${d.total.toFixed(0)} / ${PAYLOAD_KG} kg`, 40, 42);
+      rr(ctx, 40, 66, 440, 14, 7); ctx.fillStyle = 'rgba(148,163,184,0.2)'; ctx.fill();
+      rr(ctx, 40, 66, Math.max(14, 440 * Math.min(1, frac)), 14, 7); ctx.fillStyle = rgba(col, 1); ctx.fill();
+      if (performance.now() < toast.until && toast.text) {
+        ctx.textAlign = 'right'; ctx.font = '500 26px ' + FONT; ctx.fillStyle = '#7dd3fc';
+        ctx.fillText(toast.text.length > 34 ? toast.text.slice(0, 33) + '…' : toast.text, 815, 52);
+      }
+    }
+    // tab-specific footers
+    ctx.textAlign = 'left'; ctx.font = '400 26px ' + FONT; ctx.fillStyle = '#94a3b8';
+    if (dockTab === 'layout' && d) {
+      ctx.fillText(`Centre of gravity F/B ${d.cogZ.toFixed(2)} m · rear axle ${d.rear.toFixed(0)}% · ${d.count} items in · head clearance ${d.head}`, 40, 600, 944);
+      ctx.fillText(`Room surfaces ${d.planes}`, 40, 640, 944);
+    }
+    if (dockTab === 'view') wrapText(ctx, 'Cutaway hides whichever side you stand on. X-ray makes the panels see-through. Click the right stick to cycle views.', 40, 540, 944, 36);
+    if (dockTab === 'tools') wrapText(ctx, tool === 'capture' ? 'Touch a bottom corner of a real object, then the opposite bottom corner, then its top.' : 'Tape measure: touch two points. Capture: make a virtual copy of a real object (best in AR).', 40, 540, 944, 36);
+    if (dockTab === 'go') wrapText(ctx, 'Or point at the floor and pull the trigger / pinch to teleport anywhere.', 40, 540, 944, 36);
+    if (dockTab === 'help') {
+      const rows = usingHands() ? HELP_HANDS : HELP_CTRL;
+      ctx.font = '600 28px ' + FONT; ctx.fillStyle = '#e2e8f0'; ctx.fillText(usingHands() ? 'Hands' : 'Controllers', 40, 340);
+      rows.forEach((r, i) => {
+        const y = 386 + i * 42;
+        ctx.textAlign = 'left'; ctx.font = '400 26px ' + FONT; ctx.fillStyle = '#94a3b8'; ctx.fillText(r[0], 40, y);
+        ctx.textAlign = 'right'; ctx.font = '600 26px ' + FONT; ctx.fillStyle = '#f1f5f9'; ctx.fillText(r[1], 984, y);
+      });
+    }
+  }
+});
+const HELP_CTRL = [['Walk / turn', 'left stick / right stick'], ['Teleport', 'point at floor + trigger'], ['Grab near or far', 'trigger or grip'],
+  ['Spin held item', 'right stick'], ['Copy / bin held', 'A·X / B·Y'], ['Undo · menu on/off', 'left X · left Y'], ['X-ray · rear doors · views', 'A · B · click right stick']];
+const HELP_HANDS = [['Press buttons', 'poke with index finger'], ['Teleport', 'point at floor + pinch'], ['Grab near or far', 'pinch'],
+  ['Turn a held item', 'twist your wrist'], ['Copy / bin / 45°', 'held bar on the menu'], ['Turn yourself', 'Go to › Turn'], ['Menu on/off', 'Menu pill / — button']];
+
+const pill = makePanel({
+  title: '', w: 0.13, cw: 512, ch: 160,
+  show: () => placed && !dockOpen,
+  place: P => placeAt(P, 0.45, -0.38),
+  buttons: [{ id: 'open', label: '☰  Menu', accent: SKY, x: 12, y: 12, w: 488, h: 136, fs: 56, action: () => { dockOpen = true; } }]
+});
+
+// ---- Guided tour (separate wording for controllers and hands)
+const TOUR = [
+  { t: 'Welcome to your Berlingo', c: 'A quick tour of the controls. Use Next and Back, or Skip any time. Restart it from Help.', h: 'A quick tour of the controls. Poke Next with your finger, or pinch at it. Restart it from Help.' },
+  { t: 'The menu', c: 'The menu floats at chest height and follows you. Point and pull the trigger to press. Left Y hides or shows it.', h: 'The menu floats at chest height and follows you. Poke buttons with your index finger. The — button folds it into a small Menu pill.' },
+  { t: 'Moving', c: 'Left stick walks where you look, right stick turns. Point at the floor and pull the trigger to teleport.', h: 'Point at the floor and pinch to teleport. Use Go to › Turn left / right to turn on the spot, or just walk.' },
+  { t: 'Picking things up', c: 'Trigger or grip grabs. Reach in for close items, or point at something far away: it flies to your hand. Let go to drop it.', h: 'Pinch to grab: reach in for close items, or point at something far away and pinch. Open your fingers to drop it.' },
+  { t: 'Turn, copy, bin', c: 'While holding, the right stick spins the item, A or X copies it and B or Y bins it. Left X is undo.', h: 'Twist your wrist to turn it. While holding, the menu shows Copy, Bin and 45° turns: poke them with your other hand.' },
+  { t: 'Library', c: 'Open Library, choose a category and press an item. It follows your pointer: aim where it goes and pull the trigger to drop it.', h: 'Open Library, choose a category and poke an item. It follows your pointing hand: aim where it goes and pinch to drop it.' },
+  { t: 'Views, like The Sims', c: 'View: Walls up, Roof off, Cutaway, Walls down, No walls, and X-ray. Click the right stick to cycle.', h: 'View: Walls up, Roof off, Cutaway, Walls down, No walls, and X-ray.' },
+  { t: 'Layouts and tools', c: 'Layout switches Bed, Lounge and Packed and saves your arrangement. Tools has a tape measure and Capture: touch the corners of a real object to make a copy of it.', h: 'Layout switches Bed, Lounge and Packed and saves your arrangement. Tools has a tape measure and Capture: touch the corners of a real object to make a copy of it.' },
+  { t: "You're set", c: 'Have a play. Help has a cheat sheet any time.', h: 'Have a play. Help has a cheat sheet any time.' }
+];
+let tourActive = false, tourStep = 0;
+const TOUR_KEY = 'berlingo-tour-v1';
+function startTour() { tourActive = true; tourStep = 0; dockOpen = true; anchor.init = false; }
+function endTour() { tourActive = false; try { localStorage.setItem(TOUR_KEY, '1'); } catch (e) {} }
+function maybeStartTour() { let done = null; try { done = localStorage.getItem(TOUR_KEY); } catch (e) {} if (!done) startTour(); }
+const tourPanel = makePanel({
+  title: '', w: 0.44, cw: 1024, ch: 480,
+  show: () => tourActive,
+  place: P => placeAt(P, 0.62, 0.0),
+  sig: () => tourStep + '|' + usingHands(),
+  dynButtons: () => [
+    { id: 'skip', label: 'Skip', accent: GREY, x: 40, y: 372, w: 200, h: 84, fs: 34, action: endTour },
+    { id: 'back', label: 'Back', accent: GREY, x: 560, y: 372, w: 200, h: 84, fs: 34, action: () => { tourStep = Math.max(0, tourStep - 1); } },
+    { id: 'next', label: tourStep === TOUR.length - 1 ? 'Done' : 'Next', accent: [250, 204, 21], x: 784, y: 372, w: 200, h: 84, fs: 36,
+      active: () => true, action: () => { if (tourStep >= TOUR.length - 1) endTour(); else tourStep++; } }
+  ],
+  extra: (ctx) => {
+    const s = TOUR[tourStep], hands = usingHands();
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    ctx.font = '500 26px ' + FONT; ctx.fillStyle = '#facc15';
+    ctx.fillText(`Tour ${tourStep + 1} / ${TOUR.length}  ·  ${hands ? 'hands' : 'controllers'}`, 48, 56);
+    ctx.font = '700 46px ' + FONT; ctx.fillStyle = '#f8fafc'; ctx.fillText(s.t, 48, 118);
+    ctx.font = '400 32px ' + FONT; ctx.fillStyle = '#cbd5e1';
+    wrapText(ctx, hands ? s.h : s.c, 48, 186, 928, 44);
+    // progress dots
+    TOUR.forEach((_, i) => { ctx.beginPath(); ctx.arc(300 + i * 26, 414, i === tourStep ? 8 : 5, 0, Math.PI * 2); ctx.fillStyle = i === tourStep ? '#facc15' : 'rgba(148,163,184,0.5)'; ctx.fill(); });
+  }
+});
+
 // ---------- Start AR, or desktop preview ----------
 let previewControls = null;
 const overlay = document.getElementById('overlay');
@@ -1354,6 +1805,7 @@ function vrLocomotion(dt) {
   // Right hand holding an item: the right stick spins the item instead of turning you
   const rightHeld = ctrls.find(c => c.userData.src && c.userData.src.handedness === 'right' && grabbed.has(c));
   if (rightHeld) { if (Math.abs(tx) > 0.2) grabbed.get(rightHeld).yawOff -= tx * 2.5 * dt; tx = 0; snapReady = true; }
+  if (placing) { if (Math.abs(tx) > 0.2) placing.it.rotation.y -= tx * 2.5 * dt; tx = 0; snapReady = true; }
   if (Math.abs(tx) > 0.7 && snapReady) { turnUser(tx > 0 ? -Math.PI / 6 : Math.PI / 6); snapReady = false; }
   if (Math.abs(tx) < 0.3) snapReady = true;
   if (Math.abs(mx) < 0.15) mx = 0;
@@ -1425,6 +1877,7 @@ function loop(t, frame) {
   updateGrab();
   updateTools();
   updateClipping();
+  updatePlacing();
   if (previewControls) previewControls.update();
   if (t - lastStatusT >= 200) { lastStatusT = t; updateStatus(); }   // about 5 times a second
   updatePanels(performance.now());
