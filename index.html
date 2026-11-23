@@ -1,0 +1,226 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Berlingo VR planner v2</title>
+<script src="https://unpkg.com/aframe@1.5.0/dist/aframe.min.js"></script>
+</head>
+<body style="margin:0;background:#222">
+<script>
+// ---------- CONFIG (metres / kg). Placeholders: replace with your tape measurements ----------
+const PAYLOAD_KG = 600;                              // from V5C / door plate
+const FRONT_AXLE_Z = -1.35, REAR_AXLE_Z = 1.35;      // wheelbase 2.7 m, van centred on z = 0
+const CARGO = { halfW: 0.75, z0: -0.4, z1: 2.2 };    // bulkhead (z0) to rear doors (z1)
+const LOAD_FLOOR = 0.5;                              // load floor height above ground
+
+// Surfaces you can stand things on. Fixed = furniture from your photos (approximate).
+const SURF = [
+  { name: "Load floor", x0: -0.75,  x1: 0.75,  z0: -0.4, z1: 2.2, top: LOAD_FLOOR },
+  { name: "Platform",   x0: -0.725, x1: 0.725, z0: 0.4,  z1: 2.2, top: 1.0,
+    kg: 40, pos: [0, 0.75, 1.3], size: [1.45, 0.5, 1.8], color: "#c9a96e" },
+  { name: "Cupboard L", x0: -0.75,  x1: -0.45, z0: -0.2, z1: 0.3, top: 1.2,
+    kg: 10, pos: [-0.6, 0.85, 0.05], size: [0.3, 0.7, 0.5], color: "#8b6b3e" },
+  { name: "Cupboard R", x0: 0.45,   x1: 0.75,  z0: -0.2, z1: 0.3, top: 1.2,
+    kg: 10, pos: [0.6, 0.85, 0.05], size: [0.3, 0.7, 0.5], color: "#8b6b3e" }
+];
+
+// Loose items (kg, size w/h/d in metres)
+const ITEMS = [
+  { name: "Water 20L",     kg: 20, size: [0.3, 0.4, 0.2],  color: "#3b82f6" },
+  { name: "Stove",         kg: 4,  size: [0.4, 0.12, 0.35], color: "#f97316" },
+  { name: "Gas bottle",    kg: 11, size: [0.3, 0.4, 0.3],  color: "#ef4444" },
+  { name: "Bedding",       kg: 3,  size: [0.6, 0.15, 0.5], color: "#a855f7" },
+  { name: "Tools bag",     kg: 8,  size: [0.4, 0.25, 0.25], color: "#22c55e" },
+  { name: "Folding table", kg: 6,  size: [0.6, 0.7, 0.4],  color: "#eab308" }
+];
+
+// Setups: item name -> [x, z]. Outside the van = not loaded (x about 1.6).
+const PRESETS = {
+  Empty:  { "Water 20L": [1.6, -0.4], "Stove": [1.6, 0.0], "Gas bottle": [1.6, 0.4],
+            "Bedding": [1.6, 0.9], "Tools bag": [1.6, 1.3], "Folding table": [1.6, 1.8] },
+  Sleep:  { "Bedding": [0, 1.3], "Water 20L": [-0.5, -0.2], "Stove": [0.2, 0.0],
+            "Gas bottle": [0.55, -0.2], "Tools bag": [-0.45, 0.25], "Folding table": [1.6, 0.0] },
+  Travel: { "Water 20L": [-0.5, -0.2], "Gas bottle": [0.55, -0.2], "Stove": [0.2, 0.0],
+            "Bedding": [-0.45, 1.5], "Tools bag": [0.45, 1.6], "Folding table": [1.6, 0.8] }
+};
+
+// ---------- Helpers ----------
+function surfaceTop(x, z) {
+  let top = 0;
+  for (const s of SURF) {
+    if (x >= s.x0 && x <= s.x1 && z >= s.z0 && z <= s.z1 && s.top > top) top = s.top;
+  }
+  return top;
+}
+function inCargo(x, z) {
+  return Math.abs(x) <= CARGO.halfW && z >= CARGO.z0 && z <= CARGO.z1;
+}
+function placeItem(el, x, z) {
+  const h = parseFloat(el.dataset.h);
+  const y = surfaceTop(x, z) + h / 2 + 0.005;
+  el.setAttribute('position', `${x.toFixed(3)} ${y.toFixed(3)} ${z.toFixed(3)}`);
+}
+let currentPreset = 'Empty';
+function applyPreset(name) {
+  const p = PRESETS[name];
+  if (!p) return;
+  currentPreset = name;
+  document.querySelectorAll('.grab').forEach(el => {
+    const xz = p[el.dataset.name];
+    if (xz) placeItem(el, xz[0], xz[1]);
+  });
+}
+</script>
+
+<a-scene vr-mode-ui="enabled: true" renderer="colorManagement: true" background="color: #1b1f2a">
+  <!-- You: walk with movement-controls, look with the headset -->
+  <a-entity id="rig" movement-controls="speed: 0.1" position="0 0 4.2">
+    <a-entity camera look-controls position="0 1.6 0"></a-entity>
+    <a-entity id="left"  laser-controls="hand: left"  raycaster="objects: .grab, .clickable; far: 4"></a-entity>
+    <a-entity id="right" laser-controls="hand: right" raycaster="objects: .grab, .clickable; far: 4"></a-entity>
+  </a-entity>
+
+  <!-- Ground -->
+  <a-plane rotation="-90 0 0" width="40" height="40" color="#2f3b2f"></a-plane>
+
+  <!-- Chassis / underbody -->
+  <a-box position="0 0.25 0" width="1.5" height="0.5" depth="4.4" color="#3a3f47"></a-box>
+
+  <!-- Wheels (4) -->
+  <a-cylinder position="-0.8 0.33 -1.35" radius="0.33" height="0.22" rotation="0 0 90" color="#111"></a-cylinder>
+  <a-cylinder position="0.8 0.33 -1.35"  radius="0.33" height="0.22" rotation="0 0 90" color="#111"></a-cylinder>
+  <a-cylinder position="-0.8 0.33 1.35"  radius="0.33" height="0.22" rotation="0 0 90" color="#111"></a-cylinder>
+  <a-cylinder position="0.8 0.33 1.35"   radius="0.33" height="0.22" rotation="0 0 90" color="#111"></a-cylinder>
+
+  <!-- Cab (outline only) -->
+  <a-box position="0 1.0 -1.4" width="1.7" height="1.2" depth="1.6" color="#cfd4da" opacity="0.18"
+         material="transparent: true; side: double"></a-box>
+
+  <!-- Cargo bay shell (see-through) -->
+  <a-box position="0 0.48 0.9" width="1.5" height="0.04" depth="2.6" color="#8a6f4d"></a-box>
+  <a-box position="-0.8 1.05 0.9" width="0.02" height="1.1" depth="2.6" color="#ffffff" opacity="0.12"
+         material="transparent: true"></a-box>
+  <a-box position="0.8 1.05 0.9"  width="0.02" height="1.1" depth="2.6" color="#ffffff" opacity="0.12"
+         material="transparent: true"></a-box>
+  <a-box position="0 1.62 0.9" width="1.6" height="0.02" depth="2.6" color="#ffffff" opacity="0.1"
+         material="transparent: true"></a-box>
+  <a-box position="0 1.05 -0.4" width="1.6" height="1.1" depth="0.03" color="#ffffff" opacity="0.15"
+         material="transparent: true; side: double"></a-box>
+  <a-box position="0 1.05 2.2" width="1.6" height="1.1" depth="0.03" color="#cfe6ff" opacity="0.15"
+         material="transparent: true; side: double"></a-box>
+
+  <!-- Fixed fittings from SURF (platform + cupboards) -->
+  <a-entity id="fixed"></a-entity>
+
+  <!-- Loose items -->
+  <a-entity id="items"></a-entity>
+
+  <!-- Status + presets panel, angled towards the rear doors -->
+  <a-entity id="panel" position="1.3 1.6 3.0" rotation="0 -47 0">
+    <a-plane width="1.3" height="1.0" color="#111" opacity="0.88"></a-plane>
+    <a-text id="status" value="" color="#fff" width="1.5" position="-0.6 0.4 0.01" wrap-count="44"></a-text>
+    <a-entity class="clickable" data-preset="Empty"
+              geometry="primitive: plane; width: 0.36; height: 0.13" material="color: #475569"
+              text="value: Empty; align: center; width: 1.6; color: #fff" position="-0.42 -0.35 0.01"></a-entity>
+    <a-entity class="clickable" data-preset="Sleep"
+              geometry="primitive: plane; width: 0.36; height: 0.13" material="color: #2563eb"
+              text="value: Sleep; align: center; width: 1.6; color: #fff" position="0 -0.35 0.01"></a-entity>
+    <a-entity class="clickable" data-preset="Travel"
+              geometry="primitive: plane; width: 0.36; height: 0.13" material="color: #16a34a"
+              text="value: Travel; align: center; width: 1.6; color: #fff" position="0.42 -0.35 0.01"></a-entity>
+  </a-entity>
+
+  <a-sky color="#1b1f2a"></a-sky>
+</a-scene>
+
+<script>
+// Build fixed fittings
+const fixedEl = document.getElementById('fixed');
+SURF.filter(s => s.kg).forEach(s => {
+  const e = document.createElement('a-box');
+  e.setAttribute('position', s.pos.join(' '));
+  e.setAttribute('width', s.size[0]); e.setAttribute('height', s.size[1]); e.setAttribute('depth', s.size[2]);
+  e.setAttribute('color', s.color);
+  e.dataset.name = s.name;
+  fixedEl.appendChild(e);
+});
+
+// Build loose items
+const itemsEl = document.getElementById('items');
+ITEMS.forEach(it => {
+  const e = document.createElement('a-box');
+  e.setAttribute('width', it.size[0]); e.setAttribute('height', it.size[1]); e.setAttribute('depth', it.size[2]);
+  e.setAttribute('color', it.color);
+  e.setAttribute('class', 'grab');
+  e.dataset.name = it.name;
+  e.dataset.kg = it.kg;
+  e.dataset.h = it.size[1];
+  itemsEl.appendChild(e);
+});
+applyPreset('Empty');
+
+// Grab with trigger; tap a preset button to switch setup
+AFRAME.registerComponent('grabber', {
+  init() {
+    this.held = null;
+    const hand = this.el;
+    hand.addEventListener('triggerdown', () => {
+      const rc = hand.components.raycaster;
+      const hit = rc && rc.intersectedEls[0];
+      if (!hit) return;
+      if (hit.classList.contains('clickable')) { applyPreset(hit.dataset.preset); return; }
+      if (hit.classList.contains('grab')) this.held = hit;
+    });
+    hand.addEventListener('triggerup', () => {
+      if (!this.held) return;
+      const p = this.held.object3D.position;
+      placeItem(this.held, p.x, p.z);   // drop: sits on whatever surface is below
+      this.held = null;
+    });
+  },
+  tick() {
+    if (!this.held) return;
+    const wp = new THREE.Vector3();
+    this.el.object3D.getWorldPosition(wp);
+    this.held.object3D.position.copy(wp);
+  }
+});
+document.getElementById('left').setAttribute('grabber', '');
+document.getElementById('right').setAttribute('grabber', '');
+
+// Keyboard (desktop): 1 Empty, 2 Sleep, 3 Travel, R reset
+addEventListener('keydown', e => {
+  if (e.key === '1') applyPreset('Empty');
+  if (e.key === '2') applyPreset('Sleep');
+  if (e.key === '3') applyPreset('Travel');
+  if (e.key === 'r' || e.key === 'R') applyPreset('Empty');
+});
+
+// Status: loaded weight, centre of gravity, rear-axle share, payload check
+const statusEl = document.getElementById('status');
+function updateStatus() {
+  let fixedKg = 0, looseKg = 0, cx = 0, cz = 0, count = 0, off = 0;
+  SURF.filter(s => s.kg).forEach(s => { fixedKg += s.kg; cx += s.kg * s.pos[0]; cz += s.kg * s.pos[2]; });
+  document.querySelectorAll('.grab').forEach(e => {
+    const p = e.object3D.position, kg = parseFloat(e.dataset.kg) || 0;
+    if (inCargo(p.x, p.z)) { looseKg += kg; cx += kg * p.x; cz += kg * p.z; count++; }
+    else off++;
+  });
+  const total = fixedKg + looseKg;
+  const cogX = total ? cx / total : 0, cogZ = total ? cz / total : 0;
+  const rearShare = total ? (cogZ - FRONT_AXLE_Z) / (REAR_AXLE_Z - FRONT_AXLE_Z) * 100 : 0;
+  const over = total > PAYLOAD_KG;
+  statusEl.setAttribute('value',
+    `Setup: ${currentPreset}\n` +
+    `Loaded ${looseKg.toFixed(0)} kg (${count} in van, ${off} outside)\n` +
+    `Total ${total.toFixed(0)} / ${PAYLOAD_KG} kg  ${over ? 'OVER' : 'OK'}\n` +
+    `CoG L/R ${cogX.toFixed(2)} m, F/B ${cogZ.toFixed(2)} m\n` +
+    `Rear axle share ${rearShare.toFixed(0)}% (about 50 is level)\n` +
+    `Grab items with trigger. Keys 1/2/3, R = reset`);
+  statusEl.setAttribute('color', over ? '#ff6b6b' : '#ffffff');
+}
+setInterval(updateStatus, 300);
+</script>
+</body>
+</html>
