@@ -297,13 +297,49 @@ function makeItem(def) {
   g.userData = { name: def.name, kg: def.kg, h: def.size[1] };
   return g;
 }
-ITEM_DEFS.forEach((def, i) => {
-  const it = makeItem(def);
-  it.position.set(1.6 + (i % 3) * 0.45, def.size[1] / 2, -0.6 + Math.floor(i / 3) * 0.55);
+// A "captured" item: a box sized from a real object you measured with the controller
+let capturedCount = 0;
+function makeCapturedItem(dims, kg, name) {
+  const [w, h, d] = dims;
+  const g = new THREE.Group();
+  g.add(rbox(w, h, d, Math.min(0.02, w / 4, h / 4, d / 4), mat(0x2dd4bf, 0.5, 0, { transparent: true, opacity: 0.55 })));
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)),
+    new THREE.LineBasicMaterial({ color: 0x99f6e4 }));
+  g.add(edges);
+  const label = makeLabel(`${name}  ${Math.round(w * 100)}×${Math.round(d * 100)}×${Math.round(h * 100)} cm  ${kg} kg`);
+  label.position.y = h / 2 + 0.08;
+  g.add(label);
+  g.userData = { name, kg, h, dims: [w, h, d], captured: true };
+  return g;
+}
+// Text label that always faces you (canvas sprite)
+function makeLabel(text, color = '#e0f2fe') {
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 128;
+  const g = c.getContext('2d');
+  g.font = '600 52px system-ui, sans-serif';
+  const w = Math.min(1000, g.measureText(text).width + 60);
+  g.fillStyle = 'rgba(15,23,42,0.85)';
+  g.beginPath(); g.roundRect((1024 - w) / 2, 14, w, 100, 50); g.fill();
+  g.fillStyle = color; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 512, 66);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true }));
+  s.scale.set(0.8, 0.1, 1); s.renderOrder = 30;
+  return s;
+}
+function addToVan(it, x, z, ry = 0) {
+  it.position.set(x, it.userData.h / 2, z);
+  it.rotation.y = ry;
   vanRoot.add(it);
   it.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   items.push(it);
-});
+  return it;
+}
+function spawnItem(def, x, z, ry = 0) { return addToVan(makeItem(def), x, z, ry); }
+function removeItem(it) {
+  vanRoot.remove(it);
+  const i = items.indexOf(it); if (i >= 0) items.splice(i, 1);
+}
+ITEM_DEFS.forEach((def, i) => spawnItem(def, 1.6 + (i % 3) * 0.45, -0.6 + Math.floor(i / 3) * 0.55));
 
 // Reticle (placement ring on real surfaces)
 const reticle = new THREE.Mesh(
@@ -376,6 +412,7 @@ function loadLayout(name, done) {
       }
     });
     vanRoot.add(vanModel);
+    applyXray();
     currentLayout = name;
     if (done) done();
   };
@@ -504,45 +541,80 @@ function placeVan(pos) {
 }
 
 // ---------- Controllers: place, grab and drop ----------
+// grabbed: controller -> { it, offset (world vector), yawOff, spin, start: {pos, ry} }
 const grabbed = new Map();
 const ctrls = [0, 1].map(i => {
   const c = renderer.xr.getController(i);
   scene.add(c);
+  c.userData.src = null;
+  c.addEventListener('connected', e => { c.userData.src = e.data; });
+  c.addEventListener('disconnected', () => { c.userData.src = null; });
   c.addEventListener('selectstart', () => onSelectStart(c));
-  c.addEventListener('selectend', () => onSelectEnd(c));
+  c.addEventListener('selectend', () => releaseFrom(c));
+  // Grip button: grab only (no panels, no teleport)
+  c.addEventListener('squeezestart', () => { if (placed && !grabbed.has(c)) tryGrab(c); });
+  c.addEventListener('squeezeend', () => releaseFrom(c));
   return c;
 });
+function pulse(c, strength = 0.4, ms = 40) {
+  const h = c.userData.src && c.userData.src.gamepad && c.userData.src.gamepad.hapticActuators;
+  if (h && h[0] && h[0].pulse) h[0].pulse(strength, ms);
+}
+const _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, 'YXZ');
+function ctrlYaw(c) { c.getWorldQuaternion(_q); _e.setFromQuaternion(_q, 'YXZ'); return _e.y; }
+function vanYaw() { vanRoot.getWorldQuaternion(_q); _e.setFromQuaternion(_q, 'YXZ'); return _e.y; }
+function itemRoot(o) { while (o && !items.includes(o)) o = o.parent; return o; }
 
+// Grab: nearest item within reach of the hand, otherwise the item the ray points at (it flies to your hand)
+function tryGrab(c) {
+  const p = new THREE.Vector3().setFromMatrixPosition(c.matrixWorld);
+  let best = null, bestD = 0.25 * Math.max(0.4, scaleValue);
+  items.forEach(it => {
+    if ([...grabbed.values()].some(g => g.it === it)) return;
+    const d = it.getWorldPosition(new THREE.Vector3()).distanceTo(p);
+    if (d < bestD) { bestD = d; best = it; }
+  });
+  let offset = null;
+  if (best) offset = best.getWorldPosition(new THREE.Vector3()).sub(p);
+  else {
+    const hits = rayFromController(c).intersectObjects(items, true).filter(h => h.distance < 8);
+    if (hits.length) { best = itemRoot(hits[0].object); offset = new THREE.Vector3(); }
+  }
+  if (!best) return false;
+  grabbed.set(c, { it: best, offset, yawOff: best.rotation.y - (ctrlYaw(c) - vanYaw()),
+                   start: { pos: best.position.clone(), ry: best.rotation.y } });
+  pulse(c, 0.5, 30);
+  return true;
+}
+function releaseFrom(c) {
+  const g = grabbed.get(c);
+  if (!g) return;
+  grabbed.delete(c);
+  seatItem(g.it);
+  pushUndo({ type: 'move', it: g.it, pos: g.start.pos, ry: g.start.ry });
+  pulse(c, 0.25, 20);
+}
 function onSelectStart(c) {
   if (!placed) {
     if (reticle.visible) placeVan(new THREE.Vector3().setFromMatrixPosition(reticle.matrix));
     return;
   }
-  // A controller pointing at a floating panel presses its button instead of grabbing
+  // A controller pointing at a floating panel presses its button
   panelGroup.updateMatrixWorld(true);
   const ph = hitPanels(rayFromController(c));
-  if (ph) { if (ph.b) pressButton(ph.P, ph.b); return; }
-  const p = new THREE.Vector3().setFromMatrixPosition(c.matrixWorld);
-  let best = null, bestD = 0.18;
-  items.forEach(it => {
-    const d = it.getWorldPosition(new THREE.Vector3()).distanceTo(p);
-    if (d < bestD) { bestD = d; best = it; }
-  });
-  if (best) { grabbed.set(c, best); return; }
-  // Nothing in reach: if pointing at the ground, teleport there
+  if (ph) { if (ph.b) { pressButton(ph.P, ph.b); pulse(c, 0.3, 25); } return; }
+  // Measure / capture tools take the click while active
+  if (tool !== 'none') { toolClick(c); return; }
+  if (tryGrab(c)) return;
+  // Nothing to grab: if pointing at the ground, teleport there
   const g = groundHit(c);
   if (g) teleportTo(g);
 }
-function onSelectEnd(c) {
-  const it = grabbed.get(c);
-  if (!it) return;
-  grabbed.delete(c);
-  seatItem(it);
-}
 function updateGrab() {
-  grabbed.forEach((it, c) => {
-    const p = new THREE.Vector3().setFromMatrixPosition(c.matrixWorld);
-    it.position.copy(vanRoot.worldToLocal(p));
+  grabbed.forEach((g, c) => {
+    const p = new THREE.Vector3().setFromMatrixPosition(c.matrixWorld).add(g.offset);
+    g.it.position.copy(vanRoot.worldToLocal(p));
+    g.it.rotation.y = ctrlYaw(c) - vanYaw() + g.yawOff;
   });
 }
 
@@ -557,7 +629,10 @@ function readStore() {
 }
 function saveLayout() {
   const store = readStore();
-  store[currentLayout] = items.map(it => ({ n: it.userData.name, p: it.position.toArray() }));
+  store[currentLayout] = items.map(it => ({
+    n: it.userData.name, p: it.position.toArray(), ry: it.rotation.y,
+    dims: it.userData.dims || null, kg: it.userData.kg
+  }));
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(store));
     msg('Saved ' + currentLayout + ' layout on this device');
@@ -566,10 +641,16 @@ function saveLayout() {
 function loadSavedItems() {
   const saved = readStore()[currentLayout];
   if (!saved) return false;
+  // Rebuild the item set exactly as saved (including copies and captured items)
+  [...items].forEach(removeItem);
   saved.forEach(r => {
-    const it = items.find(i => i.userData.name === r.n);
-    if (it) it.position.fromArray(r.p);
+    let it;
+    if (r.dims) it = makeCapturedItem(r.dims, r.kg, r.n);
+    else { const def = ITEM_DEFS.find(d => d.name === r.n); if (!def) return; it = makeItem(def); }
+    addToVan(it, r.p[0], r.p[2], r.ry || 0);
+    it.position.fromArray(r.p);
   });
+  undoStack.length = 0;
   return true;
 }
 
@@ -793,6 +874,7 @@ const statusPanel = makePanel({
 const rc = new THREE.Raycaster();
 const mouse = { x: 0, y: 0, inside: false, downX: 0, downY: 0 };
 function rayFromController(c) {
+  rc.camera = camera;               // sprites (labels) need a camera to be raycast
   rc.ray.origin.setFromMatrixPosition(c.matrixWorld);
   rc.ray.direction.set(0, 0, -1).transformDirection(c.matrixWorld);
   return rc;
@@ -844,16 +926,34 @@ function updatePanels(now) {
   if (!placed) { rayLines.forEach(l => { l.visible = false; }); return; }
   world.updateMatrixWorld(true);
   camera.getWorldPosition(_cam);
-  const s = scaleValue, side = -(0.75 * s + 0.85);   // beside the van (its left), clear of the item area on the right
   const t = (now - panelsShownAt) / 1000;
+  // Panels sit in a 4 x 2 grid: beside the van, or (menu button / "Follow me") in an arc in front of you
+  if (panelFollow) {
+    const xrc = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    xrc.getWorldPosition(_cam);
+    xrc.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
+    const baseYaw = Math.atan2(_fwd.x, _fwd.z);
+    if (followYaw === null || Math.abs(Math.atan2(Math.sin(baseYaw - followYaw), Math.cos(baseYaw - followYaw))) > 0.9) followYaw = baseYaw;
+    followAnchor.lerp(_cam, 0.08);
+  }
   panels.forEach((P, i) => {
-    _p.set(side, P.row, 0.25 + P.col);
-    world.localToWorld(_p);
-    const k = Math.min(1, Math.max(0, t * 2 - i * 0.3)), e = 1 - Math.pow(1 - k, 3);
-    const bob = Math.sin(now / 1000 * 1.4 + i * 1.3) * 0.012;
+    const [ci, ri] = P.slot || [0, 0];
+    let sc = 1;
+    if (panelFollow) {
+      sc = 0.55;
+      const ang = followYaw + (1.5 - ci) * 0.38, dist = 0.95;
+      _p.set(followAnchor.x + Math.sin(ang) * dist, followAnchor.y - 0.05 - ri * 0.2, followAnchor.z + Math.cos(ang) * dist);
+    } else {
+      const side = -(0.75 * scaleValue + 0.85);
+      _p.set(side, 1.62 - ri * 0.4, 0.3 + (ci - 1.5) * 0.66);
+      world.localToWorld(_p);
+    }
+    const k = Math.min(1, Math.max(0, t * 2 - i * 0.15)), e = 1 - Math.pow(1 - k, 3);
+    const bob = panelFollow ? 0 : Math.sin(now / 1000 * 1.4 + i * 1.3) * 0.012;
     P.mesh.position.set(_p.x, _p.y + bob - (1 - e) * 0.08, _p.z);
-    P.mesh.rotation.set(0, Math.atan2(_cam.x - _p.x, _cam.z - _p.z), 0);   // billboard: turn around Y only
-    P.mesh.scale.setScalar(0.9 + 0.1 * e);
+    const look = panelFollow ? followAnchor : _cam;
+    P.mesh.rotation.set(0, Math.atan2(look.x - _p.x, look.z - _p.z), 0);   // face you, turning around Y only
+    P.mesh.scale.setScalar(sc * (0.9 + 0.1 * e));
     P.mat.opacity = e;
   });
   panelGroup.updateMatrixWorld(true);
@@ -882,6 +982,248 @@ function updatePanels(now) {
     if (key !== P.lastKey) { P.lastKey = key; drawPanel(P, now); }
   });
 }
+
+// =====================================================================================
+// ---------- Tools: undo, x-ray, viewpoints, catalogue, tape measure, capture a real item ----------
+// =====================================================================================
+let panelFollow = false, followYaw = null;
+const followAnchor = new THREE.Vector3();
+function toggleFollow() {
+  panelFollow = !panelFollow; followYaw = null;
+  (renderer.xr.isPresenting ? renderer.xr.getCamera() : camera).getWorldPosition(followAnchor);
+  msg(panelFollow ? 'Panels follow you (menu button to park them by the van)' : 'Panels parked beside the van');
+}
+
+// Undo
+const undoStack = [];
+function pushUndo(u) { undoStack.push(u); if (undoStack.length > 60) undoStack.shift(); }
+function doUndo() {
+  const u = undoStack.pop();
+  if (!u) { msg('Nothing to undo'); return; }
+  if (u.type === 'move') { u.it.position.copy(u.pos); u.it.rotation.y = u.ry; }
+  if (u.type === 'add') removeItem(u.it);
+  if (u.type === 'del') { vanRoot.add(u.it); items.push(u.it); }
+  msg('Undone');
+}
+
+// Duplicate / delete the item in a hand
+function duplicateHeld(c) {
+  const g = grabbed.get(c); if (!g) return;
+  const src = g.it, ud = src.userData;
+  const copy = ud.captured ? makeCapturedItem(ud.dims, ud.kg, ud.name) : makeItem(ITEM_DEFS.find(d => d.name === ud.name));
+  addToVan(copy, src.position.x + 0.1, src.position.z + 0.1, src.rotation.y);
+  seatItem(copy);
+  pushUndo({ type: 'add', it: copy });
+  msg('Copied ' + ud.name); pulse(c, 0.5, 40);
+}
+function deleteHeld(c) {
+  const g = grabbed.get(c); if (!g) return;
+  grabbed.delete(c);
+  removeItem(g.it);
+  pushUndo({ type: 'del', it: g.it });
+  msg('Removed ' + g.it.userData.name + ' (Undo brings it back)'); pulse(c, 0.8, 60);
+}
+
+// X-ray: see through the body panels and glass, so you can see the load from outside
+let xray = false;
+function applyXray() {
+  if (!vanModel) return;
+  vanModel.traverse(o => {
+    if (!o.isMesh || !o.material) return;
+    const n = (o.material.name || '').toLowerCase();
+    if (!/body|paint|silver|glass|seam|bumper|dark|trim|headliner|felt|led/.test(n)) return;
+    if (o.material.userData.baseOpacity === undefined) {
+      o.material.userData.baseOpacity = o.material.opacity;
+      o.material.userData.baseTransparent = o.material.transparent;
+    }
+    o.material.transparent = xray || o.material.userData.baseTransparent;
+    o.material.opacity = xray ? 0.12 : o.material.userData.baseOpacity;
+    o.material.depthWrite = !xray;
+    o.material.needsUpdate = true;
+  });
+}
+function toggleXray() { xray = !xray; applyXray(); msg(xray ? 'X-ray on: body panels see-through' : 'X-ray off'); }
+
+// Viewpoints: jump to a spot around (or inside) the van, facing it
+const VIEWS = {
+  rear:   { p: [0, 3.4],    look: [0, 1.2],  eye: 0,    label: 'Rear doors' },
+  side:   { p: [-2.3, 0.4], look: [0, 0.4],  eye: 0,    label: 'Side door' },
+  inside: { p: [0, 1.75],   look: [0, -0.4], eye: 0.25, label: 'Inside (kneeling)' },
+  front:  { p: [0, -4.2],   look: [0, 0],    eye: 0,    label: 'Front' }
+};
+function goTo(key) {
+  const v = VIEWS[key]; if (!v || !placed) return;
+  world.updateMatrixWorld(true);
+  const target = world.localToWorld(new THREE.Vector3(v.p[0] * scaleValue, 0, v.p[1] * scaleValue));
+  const lookAt = world.localToWorld(new THREE.Vector3(v.look[0] * scaleValue, 0, v.look[1] * scaleValue));
+  if (!renderer.xr.isPresenting) {           // desktop preview: move the orbit camera
+    if (previewControls) {
+      camera.position.set(target.x, 1.6 - v.eye, target.z);
+      previewControls.target.set(lookAt.x, 1.0, lookAt.z); previewControls.update();
+    }
+    msg(v.label); return;
+  }
+  // Turn so you face the look point from the target spot, then teleport there
+  const h = headPos().clone();
+  renderer.xr.getCamera().getWorldDirection(_fwd);
+  const curYaw = Math.atan2(_fwd.x, _fwd.z), wantYaw = Math.atan2(lookAt.x - target.x, lookAt.z - target.z);
+  turnUser(wantYaw - curYaw);
+  stage.updateMatrixWorld(true);
+  // target moved with the stage turn: recompute it
+  const t2 = world.localToWorld(new THREE.Vector3(v.p[0] * scaleValue, 0, v.p[1] * scaleValue));
+  moveUser(t2.x - h.x, t2.z - h.z);
+  stage.position.y = v.eye;                   // inside: lift the van a little so you are at kneeling height
+  msg(v.label);
+}
+
+// Catalogue: add a new item near you
+function addFromCatalogue(def) {
+  if (!placed) return;
+  const h = headPos().clone();
+  (renderer.xr.isPresenting ? renderer.xr.getCamera() : camera).getWorldDirection(_fwd);
+  _fwd.y = 0; _fwd.normalize();
+  const spot = h.add(_fwd.multiplyScalar(0.8));
+  const local = vanRoot.worldToLocal(spot.clone());
+  const it = spawnItem(def, local.x, local.z, 0);
+  seatItem(it);
+  pushUndo({ type: 'add', it });
+  msg('Added ' + def.name);
+}
+
+// Tools that take trigger clicks: tape measure and "capture a real item"
+let tool = 'none';                         // 'none' | 'measure' | 'capture'
+let toolPts = [];
+const toolGroup = new THREE.Group(); scene.add(toolGroup);
+const dotMat = new THREE.MeshBasicMaterial({ color: 0xfacc15, depthTest: false });
+const lineMat = new THREE.LineBasicMaterial({ color: 0xfacc15, depthTest: false });
+const previewLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), lineMat);
+previewLine.visible = false; previewLine.renderOrder = 31; scene.add(previewLine);
+let previewLabel = null;
+function setTool(t) {
+  tool = tool === t ? 'none' : t;
+  toolPts = [];
+  previewLine.visible = false;
+  if (previewLabel) { scene.remove(previewLabel); previewLabel = null; }
+  if (tool === 'measure') msg('Tape measure: touch the first point and pull the trigger, then the second');
+  else if (tool === 'capture') msg('Capture: touch a bottom corner of the real item, then the opposite bottom corner, then its top');
+  else msg('Tool off');
+}
+function tipOf(c) {             // the measuring point: 5 cm in front of the controller (or your pinch)
+  return new THREE.Vector3(0, 0, -0.05).applyMatrix4(c.matrixWorld);
+}
+function addDot(p) {
+  const d = new THREE.Mesh(new THREE.SphereGeometry(0.012, 12, 8), dotMat);
+  d.position.copy(p); d.renderOrder = 31; toolGroup.add(d); return d;
+}
+function toolClick(c) {
+  const p = tipOf(c);
+  pulse(c, 0.4, 25);
+  if (tool === 'measure') {
+    toolPts.push(p); addDot(p);
+    if (toolPts.length === 2) {
+      const [a, b] = toolPts;
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), lineMat);
+      line.renderOrder = 31; toolGroup.add(line);
+      const lab = makeLabel(`${(a.distanceTo(b) * 100 / scaleValue).toFixed(1)} cm`, '#fef08a');
+      lab.position.copy(a).lerp(b, 0.5).add(new THREE.Vector3(0, 0.05, 0)); toolGroup.add(lab);
+      toolPts = [];
+    }
+  } else if (tool === 'capture') {
+    toolPts.push(p); addDot(p);
+    if (toolPts.length === 3) {
+      // Footprint from the two bottom corners (in the van's frame), height from the third point
+      const [a, b, top] = toolPts.map(q => vanRoot.worldToLocal(q.clone()));
+      const w = Math.max(0.03, Math.abs(a.x - b.x)), d = Math.max(0.03, Math.abs(a.z - b.z));
+      const h = Math.max(0.03, top.y - Math.min(a.y, b.y));
+      const kg = Math.max(0.5, Math.min(40, Math.round(w * h * d * 150 * 2) / 2));   // rough guess: 150 kg per m³
+      capturedCount++;
+      const it = makeCapturedItem([w, h, d], kg, 'Your item ' + capturedCount);
+      addToVan(it, (a.x + b.x) / 2, (a.z + b.z) / 2, 0);
+      it.position.y = Math.min(a.y, b.y) + h / 2;
+      pushUndo({ type: 'add', it });
+      msg(`Captured: ${Math.round(w * 100)} × ${Math.round(d * 100)} × ${Math.round(h * 100)} cm, about ${kg} kg. Grab it and put it in the van.`);
+      toolPts = [];
+      toolGroup.clear();
+      tool = 'none';
+    }
+  }
+}
+function clearMeasurements() { toolGroup.clear(); toolPts = []; msg('Measurements cleared'); }
+function updateTools() {
+  // live line from the last point to the controller tip while measuring/capturing
+  previewLine.visible = false;
+  if (tool === 'none' || !toolPts.length || !renderer.xr.isPresenting) return;
+  const c = ctrls.find(x => x.visible); if (!c) return;
+  const a = toolPts[toolPts.length - 1], b = tipOf(c);
+  previewLine.geometry.setFromPoints([a, b]); previewLine.visible = true;
+}
+
+// Controller face buttons (edge-triggered)
+// Holding an item: A/X = copy, B/Y = remove. Not holding: left Y = panels follow you, left X = undo,
+// right A = x-ray, right B = jump to the rear doors.
+const prevBtn = new Map();
+function handleButtons() {
+  if (!renderer.xr.isPresenting || !placed) return;
+  ctrls.forEach(c => {
+    const src = c.userData.src; if (!src || !src.gamepad) return;
+    const b = src.gamepad.buttons, was = prevBtn.get(c) || [];
+    const down = i => b[i] && b[i].pressed && !was[i];
+    const holding = grabbed.has(c);
+    if (down(4)) { if (holding) duplicateHeld(c); else if (src.handedness === 'left') doUndo(); else toggleXray(); }
+    if (down(5)) { if (holding) deleteHeld(c); else if (src.handedness === 'left') toggleFollow(); else goTo('rear'); }
+    prevBtn.set(c, b.map(x => x.pressed));
+  });
+}
+
+// ----- New panels -----
+Object.assign(ACC, { measure: [250, 204, 21], capture: [45, 212, 191], xray: [167, 139, 250], undo: [148, 163, 184],
+  view: [96, 165, 250], add: [74, 222, 128], follow: [244, 114, 182] });
+const toolsPanel = makePanel({
+  title: 'Tools', w: 0.6,
+  sig: () => tool + xray + panelFollow,
+  buttons: [
+    { id: 'measure', label: 'Tape measure', accent: ACC.measure, action: () => setTool('measure'), active: () => tool === 'measure' },
+    { id: 'capture', label: 'Capture real item', accent: ACC.capture, action: () => setTool('capture'), active: () => tool === 'capture' },
+    { id: 'xray', label: 'X-ray van', accent: ACC.xray, action: toggleXray, active: () => xray },
+    { id: 'undo', label: 'Undo', accent: ACC.undo, action: doUndo },
+    { id: 'clear', label: 'Clear measures', accent: ACC.undo, action: clearMeasurements },
+    { id: 'follow', label: 'Follow me', accent: ACC.follow, action: toggleFollow, active: () => panelFollow }
+  ].map((b, i) => Object.assign(b, { x: 40 + (i % 3) * 320, y: 125 + Math.floor(i / 3) * 185, w: 300, h: 165, fs: 36 }))
+});
+const viewsPanel = makePanel({
+  title: 'Go to', w: 0.6,
+  buttons: Object.entries(VIEWS).map(([k, v], i) => ({ id: k, label: v.label, accent: ACC.view, action: () => goTo(k),
+    x: 40 + (i % 2) * 482, y: 125 + Math.floor(i / 2) * 185, w: 462, h: 165, fs: 40 }))
+});
+const addPanel = makePanel({
+  title: 'Add items', w: 0.6,
+  extra: (ctx) => { ctx.textAlign = 'right'; ctx.font = '400 30px ' + FONT; ctx.fillStyle = '#94a3b8'; ctx.fillText('appears in front of you', 976, 72); },
+  buttons: ITEM_DEFS.map((d, i) => ({ id: 'add' + i, label: d.name, accent: ACC.add, action: () => addFromCatalogue(d),
+    x: 40 + (i % 3) * 320, y: 118 + Math.floor(i / 3) * 128, w: 300, h: 112, fs: 34 }))
+});
+const helpPanel = makePanel({
+  title: 'Controls', w: 0.6,
+  extra: (ctx) => {
+    const rows = [
+      ['Walk', 'left stick'],
+      ['Turn', 'right stick'],
+      ['Teleport', 'point at floor + trigger'],
+      ['Grab (near or far)', 'trigger or grip'],
+      ['Spin held item', 'right stick'],
+      ['Copy / remove held', 'A·X / B·Y'],
+      ['Undo / follow me', 'left X / left Y'],
+      ['X-ray / rear doors', 'right A / right B']
+    ];
+    rows.forEach((r, i) => {
+      const y = 128 + i * 47;
+      ctx.textAlign = 'left'; ctx.font = '500 30px ' + FONT; ctx.fillStyle = '#94a3b8'; ctx.fillText(r[0], 48, y);
+      ctx.textAlign = 'right'; ctx.font = '600 30px ' + FONT; ctx.fillStyle = '#f1f5f9'; ctx.fillText(r[1], 976, y);
+    });
+  }
+});
+// Grid slots: [column, row]
+layoutPanel.slot = [0, 0]; sizePanel.slot = [1, 0]; toolsPanel.slot = [2, 0]; viewsPanel.slot = [3, 0];
+statusPanel.slot = [0, 1]; actionsPanel.slot = [1, 1]; addPanel.slot = [2, 1]; helpPanel.slot = [3, 1];
 
 // ---------- Start AR, or desktop preview ----------
 let previewControls = null;
@@ -956,6 +1298,9 @@ function vrLocomotion(dt) {
     if (src.handedness === 'left') { mx = sx; mz = sy; }
     if (src.handedness === 'right') { tx = sx; }
   }
+  // Right hand holding an item: the right stick spins the item instead of turning you
+  const rightHeld = ctrls.find(c => c.userData.src && c.userData.src.handedness === 'right' && grabbed.has(c));
+  if (rightHeld) { if (Math.abs(tx) > 0.2) grabbed.get(rightHeld).yawOff -= tx * 2.5 * dt; tx = 0; snapReady = true; }
   if (Math.abs(tx) > 0.7 && snapReady) { turnUser(tx > 0 ? -Math.PI / 6 : Math.PI / 6); snapReady = false; }
   if (Math.abs(tx) < 0.3) snapReady = true;
   if (Math.abs(mx) < 0.15) mx = 0;
@@ -1023,7 +1368,9 @@ function loop(t, frame) {
     } else { reticle.visible = false; lastHitValid = false; }
   }
   if (renderer.xr.isPresenting && frame) updatePlanes(frame);
+  handleButtons();
   updateGrab();
+  updateTools();
   if (previewControls) previewControls.update();
   if (t - lastStatusT >= 200) { lastStatusT = t; updateStatus(); }   // about 5 times a second
   updatePanels(performance.now());
